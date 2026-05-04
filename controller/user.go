@@ -1,6 +1,8 @@
 package controller
 
 import (
+	"time"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -46,12 +48,23 @@ func Login(c *gin.Context) {
 		common.ApiErrorI18n(c, i18n.MsgInvalidParams)
 		return
 	}
+	// SECURITY (M-4): account-level lockout — independent of IP rate limit.
+	if locked, ttl := isAccountLocked(username); locked {
+		common.SysLog(fmt.Sprintf("login blocked: account %q is locked for %ds", username, ttl))
+		c.JSON(http.StatusTooManyRequests, gin.H{
+			"success": false,
+			"message": fmt.Sprintf("账号已被临时锁定，请 %d 秒后再试", ttl),
+		})
+		return
+	}
 	user := model.User{
 		Username: username,
 		Password: password,
 	}
 	err = user.ValidateAndFill()
 	if err != nil {
+		// Increment failure counter on any auth failure
+		recordFailedLogin(username)
 		switch {
 		case errors.Is(err, model.ErrDatabase):
 			common.SysLog(fmt.Sprintf("Login database error for user %s: %v", username, err))
@@ -63,6 +76,8 @@ func Login(c *gin.Context) {
 		}
 		return
 	}
+	// Successful login → reset failure counter
+	clearFailedLogin(username)
 
 	// 检查是否启用2FA
 	if model.IsTwoFAEnabled(user.Id) {
@@ -1265,4 +1280,62 @@ func UpdateUserSetting(c *gin.Context) {
 	}
 
 	common.ApiSuccessI18n(c, i18n.MsgSettingSaved, nil)
+}
+
+// SECURITY (M-4): account-level login lockout primitives.
+// Default: 5 failures within 15 minutes locks the account for 15 minutes.
+// Configurable via LOGIN_LOCKOUT_THRESHOLD and LOGIN_LOCKOUT_WINDOW_SECONDS.
+func loginLockoutThreshold() int {
+	v := common.GetEnvOrDefault("LOGIN_LOCKOUT_THRESHOLD", "5")
+	n, err := strconv.Atoi(v)
+	if err != nil || n < 1 {
+		return 5
+	}
+	return n
+}
+func loginLockoutWindow() int {
+	v := common.GetEnvOrDefault("LOGIN_LOCKOUT_WINDOW_SECONDS", "900")
+	n, err := strconv.Atoi(v)
+	if err != nil || n < 30 {
+		return 900
+	}
+	return n
+}
+func loginFailKey(username string) string {
+	return "login_fail:" + strings.ToLower(strings.TrimSpace(username))
+}
+func isAccountLocked(username string) (bool, int) {
+	if !common.RedisEnabled || common.RDB == nil {
+		return false, 0
+	}
+	key := loginFailKey(username)
+	count, err := common.RDB.Get(context.Background(), key).Int()
+	if err != nil {
+		return false, 0
+	}
+	if count >= loginLockoutThreshold() {
+		ttl, _ := common.RDB.TTL(context.Background(), key).Result()
+		return true, int(ttl.Seconds())
+	}
+	return false, 0
+}
+func recordFailedLogin(username string) {
+	if !common.RedisEnabled || common.RDB == nil {
+		return
+	}
+	ctx := context.Background()
+	key := loginFailKey(username)
+	count, err := common.RDB.Incr(ctx, key).Result()
+	if err != nil {
+		return
+	}
+	if count == 1 {
+		_ = common.RDB.Expire(ctx, key, time.Duration(loginLockoutWindow())*time.Second).Err()
+	}
+}
+func clearFailedLogin(username string) {
+	if !common.RedisEnabled || common.RDB == nil {
+		return
+	}
+	_ = common.RDB.Del(context.Background(), loginFailKey(username)).Err()
 }
