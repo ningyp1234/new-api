@@ -128,6 +128,27 @@ func authHelper(c *gin.Context, minRole int) {
 		c.Abort()
 		return
 	}
+	// SECURITY (H-2): re-fetch status/role from cache (DB-backed, short TTL).
+	// Without this, a user disabled by admin keeps an active session for up to
+	// MaxAge (30 days). With cache TTL ~30s the worst-case stale window is small.
+	uid, _ := id.(int)
+	if uid > 0 && !useAccessToken {
+		if liveUser, cacheErr := model.GetUserCache(uid); cacheErr == nil && liveUser != nil {
+			if liveUser.Status != common.UserStatusEnabled {
+				session := sessions.Default(c)
+				session.Clear()
+				_ = session.Save()
+				c.JSON(http.StatusOK, gin.H{
+					"success": false,
+					"message": common.TranslateMessage(c, i18n.MsgAuthUserBanned),
+				})
+				c.Abort()
+				return
+			}
+			// 同步实时 role：admin 被降权 / 升权立刻生效
+			role = liveUser.Role
+		}
+	}
 	if role.(int) < minRole {
 		c.JSON(http.StatusOK, gin.H{
 			"success": false,
