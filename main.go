@@ -297,6 +297,15 @@ func InitResources() error {
 
 	model.CheckSetup()
 
+	// SECURITY (H-3): one-time migration to encrypt any plaintext channel.Key
+	// values left over from older deployments. Idempotent — already-encrypted
+	// rows are skipped.
+	if migrated, mErr := model.MigrateChannelKeysToEncrypted(); mErr != nil {
+		common.SysLog("WARN: channel key encryption migration failed: " + mErr.Error())
+	} else if migrated > 0 {
+		common.SysLog(fmt.Sprintf("encrypted %d legacy plaintext channel keys at rest", migrated))
+	}
+
 	// Initialize options, should after model.InitDB()
 	model.InitOptionMap()
 

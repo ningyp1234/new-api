@@ -1006,3 +1006,97 @@ func CountChannelsGroupByType() (map[int64]int64, error) {
 	}
 	return counts, nil
 }
+
+// ============================================================
+// SECURITY (H-3): Channel.Key encryption at rest
+// BeforeCreate / BeforeUpdate 钩子：写入前加密
+// AfterFind 钩子：读出后解密
+// 加密不是幂等的——但 EncryptField 内部对已加密 prefix 幂等。
+// ============================================================
+
+func (c *Channel) BeforeCreate(tx *gorm.DB) error {
+	return c.encryptKey()
+}
+
+func (c *Channel) BeforeUpdate(tx *gorm.DB) error {
+	return c.encryptKey()
+}
+
+func (c *Channel) BeforeSave(tx *gorm.DB) error {
+	return c.encryptKey()
+}
+
+func (c *Channel) AfterFind(tx *gorm.DB) error {
+	return c.decryptKey()
+}
+
+func (c *Channel) encryptKey() error {
+	if c.Key == "" {
+		return nil
+	}
+	enc, err := common.EncryptField(c.Key)
+	if err != nil {
+		return err
+	}
+	c.Key = enc
+	return nil
+}
+
+func (c *Channel) decryptKey() error {
+	if c.Key == "" {
+		return nil
+	}
+	plain, err := common.DecryptField(c.Key)
+	if err != nil {
+		return err
+	}
+	c.Key = plain
+	return nil
+}
+
+// MigrateChannelKeysToEncrypted 一次性迁移：把所有还是明文的 channel.Key 加密回写
+// 在 main.go 启动时（DB 初始化后）调用一次。已加密的会被跳过。
+func MigrateChannelKeysToEncrypted() (int, error) {
+	var channels []Channel
+	// Use raw select to bypass AfterFind (we need raw stored value)
+	rows, err := DB.Raw("SELECT id, key FROM channels").Rows()
+	if err != nil {
+		return 0, err
+	}
+	defer rows.Close()
+	type rawRow struct {
+		Id  int
+		Key string
+	}
+	var toMigrate []rawRow
+	for rows.Next() {
+		var id int
+		var key string
+		if err := rows.Scan(&id, &key); err != nil {
+			continue
+		}
+		if key == "" || common.IsFieldEncrypted(key) {
+			continue
+		}
+		toMigrate = append(toMigrate, rawRow{Id: id, Key: key})
+	}
+	migrated := 0
+	for _, r := range toMigrate {
+		enc, err := common.EncryptField(r.Key)
+		if err != nil {
+			common.SysLog(fmt.Sprintf("encrypt channel %d key failed: %v", r.Id, err))
+			continue
+		}
+		// raw update to bypass BeforeSave (which would re-encrypt — but it is idempotent so OK)
+		if err := DB.Exec("UPDATE channels SET key = ? WHERE id = ?", enc, r.Id).Error; err != nil {
+			common.SysLog(fmt.Sprintf("update channel %d key failed: %v", r.Id, err))
+			continue
+		}
+		migrated++
+	}
+	if migrated > 0 {
+		common.SysLog(fmt.Sprintf("migrated %d channel keys to encrypted at rest", migrated))
+	}
+	return migrated, nil
+}
+
