@@ -145,8 +145,9 @@ func authHelper(c *gin.Context, minRole int) {
 				c.Abort()
 				return
 			}
-			// 同步实时 role：admin 被降权 / 升权立刻生效
-			role = liveUser.Role
+			// 注意：UserBase 不带 Role 字段，role 实时同步需要 GetUserById 直查 DB
+			// 当前仅 Status 实时校验（H-2 核心：禁用立即生效）；
+			// role 变更（admin 升降权）等 session 自然过期或主动登出
 		}
 	}
 	if role.(int) < minRole {
