@@ -1,6 +1,8 @@
 package model
 
 import (
+	"encoding/base64"
+	"crypto/rand"
 	"fmt"
 	"log"
 	"os"
@@ -69,8 +71,17 @@ func createRootAccountIfNeed() error {
 	var user User
 	//if user.Status != common.UserStatusEnabled {
 	if err := DB.First(&user).Error; err != nil {
-		common.SysLog("no user exists, create a root user for you: username is root, password is 123456")
-		hashedPassword, err := common.Password2Hash("123456")
+		// SECURITY (C-1): 不再使用硬编码密码 "123456"。
+		// 改为生成强随机密码，写入 /data/initial_root_password.txt（0400），
+		// 由部署人员一次性读取后改密。也允许通过环境变量 INITIAL_ROOT_PASSWORD 覆盖。
+		initialPwd := os.Getenv("INITIAL_ROOT_PASSWORD")
+		if initialPwd == "" {
+			initialPwd = generateRootPassword()
+		}
+		if len(initialPwd) < 16 {
+			return fmt.Errorf("INITIAL_ROOT_PASSWORD must be >= 16 chars")
+		}
+		hashedPassword, err := common.Password2Hash(initialPwd)
 		if err != nil {
 			return err
 		}
@@ -83,9 +94,32 @@ func createRootAccountIfNeed() error {
 			AccessToken: nil,
 			Quota:       100000000,
 		}
-		DB.Create(&rootUser)
+		if err := DB.Create(&rootUser).Error; err != nil {
+			return err
+		}
+		writeInitialRootPasswordOnce(initialPwd)
+		common.SysLog("root user created. initial password written to /data/initial_root_password.txt — please log in and change it immediately")
 	}
 	return nil
+}
+
+// generateRootPassword 生成 32 字符高熵随机密码
+func generateRootPassword() string {
+	b := make([]byte, 24)
+	if _, err := rand.Read(b); err != nil {
+		return fmt.Sprintf("emergency-%d-%s", time.Now().UnixNano(), common.GetUUID())
+	}
+	return strings.TrimRight(base64.URLEncoding.EncodeToString(b), "=")
+}
+
+// writeInitialRootPasswordOnce 把初始密码写到 /data 下，文件权限 0400；存在则不覆盖
+func writeInitialRootPasswordOnce(pwd string) {
+	path := "/data/initial_root_password.txt"
+	if _, err := os.Stat(path); err == nil {
+		return
+	}
+	_ = os.WriteFile(path, []byte(pwd+"
+"), 0o400)
 }
 
 func CheckSetup() {
