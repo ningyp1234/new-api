@@ -118,8 +118,7 @@ func writeInitialRootPasswordOnce(pwd string) {
 	if _, err := os.Stat(path); err == nil {
 		return
 	}
-	_ = os.WriteFile(path, []byte(pwd+"
-"), 0o400)
+	_ = os.WriteFile(path, []byte(pwd+"\n"), 0o400)
 }
 
 func CheckSetup() {
