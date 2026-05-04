@@ -175,12 +175,24 @@ func main() {
 	server.Use(middleware.I18n())
 	middleware.SetUpLogger(server)
 	// Initialize session store
+	// SECURITY (H-1): Secure flag is auto-derived from SERVER_ADDRESS env var.
+	// Production deployments behind https → Secure=true automatically.
+	// Allow explicit override via FORCE_SECURE_COOKIE=true|false.
+	cookieSecure := strings.HasPrefix(strings.ToLower(os.Getenv("SERVER_ADDRESS")), "https://")
+	if v := os.Getenv("FORCE_SECURE_COOKIE"); v != "" {
+		cookieSecure = (v == "true" || v == "1")
+	}
+	if cookieSecure {
+		common.SysLog("session cookie Secure=true (https detected)")
+	} else {
+		common.SysLog("WARNING: session cookie Secure=false; only safe for local/internal HTTP. Set SERVER_ADDRESS=https://... in production")
+	}
 	store := cookie.NewStore([]byte(common.SessionSecret))
 	store.Options(sessions.Options{
 		Path:     "/",
 		MaxAge:   2592000, // 30 days
 		HttpOnly: true,
-		Secure:   false,
+		Secure:   cookieSecure,
 		SameSite: http.SameSiteStrictMode,
 	})
 	server.Use(sessions.Sessions("session", store))
