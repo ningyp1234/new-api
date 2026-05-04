@@ -1057,7 +1057,6 @@ func (c *Channel) decryptKey() error {
 // MigrateChannelKeysToEncrypted 一次性迁移：把所有还是明文的 channel.Key 加密回写
 // 在 main.go 启动时（DB 初始化后）调用一次。已加密的会被跳过。
 func MigrateChannelKeysToEncrypted() (int, error) {
-	var channels []Channel
 	// Use raw select to bypass AfterFind (we need raw stored value)
 	rows, err := DB.Raw("SELECT id, key FROM channels").Rows()
 	if err != nil {

@@ -2,7 +2,6 @@ package service
 
 import (
 	"time"
-	"strconv"
 	"fmt"
 	"net/http"
 
@@ -94,11 +93,9 @@ func acquireTrustInflightSlot(c *gin.Context, userId int) error {
 	if !common.RedisEnabled || common.RDB == nil {
 		return nil
 	}
-	limit := 20
-	if v := common.GetEnvOrDefault("TRUST_INFLIGHT_LIMIT", "20"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 {
-			limit = n
-		}
+	limit := common.GetEnvOrDefault("TRUST_INFLIGHT_LIMIT", 20)
+	if limit < 1 {
+		limit = 20
 	}
 	key := fmt.Sprintf("trust_inflight:%d", userId)
 	ctx := c.Request.Context()

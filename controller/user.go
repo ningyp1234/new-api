@@ -1286,17 +1286,15 @@ func UpdateUserSetting(c *gin.Context) {
 // Default: 5 failures within 15 minutes locks the account for 15 minutes.
 // Configurable via LOGIN_LOCKOUT_THRESHOLD and LOGIN_LOCKOUT_WINDOW_SECONDS.
 func loginLockoutThreshold() int {
-	v := common.GetEnvOrDefault("LOGIN_LOCKOUT_THRESHOLD", "5")
-	n, err := strconv.Atoi(v)
-	if err != nil || n < 1 {
+	n := common.GetEnvOrDefault("LOGIN_LOCKOUT_THRESHOLD", 5)
+	if n < 1 {
 		return 5
 	}
 	return n
 }
 func loginLockoutWindow() int {
-	v := common.GetEnvOrDefault("LOGIN_LOCKOUT_WINDOW_SECONDS", "900")
-	n, err := strconv.Atoi(v)
-	if err != nil || n < 30 {
+	n := common.GetEnvOrDefault("LOGIN_LOCKOUT_WINDOW_SECONDS", 900)
+	if n < 30 {
 		return 900
 	}
 	return n
