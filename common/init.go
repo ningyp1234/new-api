@@ -46,15 +46,28 @@ func InitEnv() {
 		os.Exit(0)
 	}
 
-	if os.Getenv("SESSION_SECRET") != "" {
-		ss := os.Getenv("SESSION_SECRET")
-		if ss == "random_string" {
-			log.Println("WARNING: SESSION_SECRET is set to the default value 'random_string', please change it to a random string.")
-			log.Println("警告：SESSION_SECRET被设置为默认值'random_string'，请修改为随机字符串。")
-			log.Fatal("Please set SESSION_SECRET to a random string.")
-		} else {
-			SessionSecret = ss
+	// SECURITY (M-1): SESSION_SECRET must be explicitly set in production.
+	// Without it, every restart generates a fresh secret → all sessions
+	// invalidated. In multi-replica deployments, each replica picks a
+	// different secret → users randomly logged out depending on which
+	// replica routes them. Both are bad operational surprises.
+	envSecret := os.Getenv("SESSION_SECRET")
+	if envSecret == "" {
+		// Allow opt-out only when explicitly running in dev mode
+		if os.Getenv("DEV_ALLOW_RANDOM_SESSION_SECRET") != "true" {
+			log.Fatal("SECURITY: SESSION_SECRET environment variable is required. " +
+				"Generate one with: openssl rand -base64 36. " +
+				"To skip this check in dev only, set DEV_ALLOW_RANDOM_SESSION_SECRET=true")
 		}
+		log.Println("WARNING: running with random SESSION_SECRET (DEV_ALLOW_RANDOM_SESSION_SECRET=true). All sessions will be invalidated on restart.")
+	} else if envSecret == "random_string" {
+		log.Println("WARNING: SESSION_SECRET is set to the default value 'random_string', please change it to a random string.")
+		log.Println("警告：SESSION_SECRET被设置为默认值'random_string'，请修改为随机字符串。")
+		log.Fatal("Please set SESSION_SECRET to a random string.")
+	} else if len(envSecret) < 32 {
+		log.Fatal("SECURITY: SESSION_SECRET is too short (< 32 chars). Generate a stronger one with: openssl rand -base64 36")
+	} else {
+		SessionSecret = envSecret
 	}
 	if os.Getenv("CRYPTO_SECRET") != "" {
 		CryptoSecret = os.Getenv("CRYPTO_SECRET")
