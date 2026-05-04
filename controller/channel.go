@@ -1,6 +1,9 @@
 package controller
 
 import (
+	"os"
+	"net/url"
+	"net"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -433,10 +436,73 @@ func validateTwoFactorAuth(twoFA *model.TwoFA, code string) bool {
 }
 
 // validateChannel 通用的渠道校验函数
+
+// SECURITY (M-3): validateChannelBaseURL rejects URLs pointing at private IPs,
+// loopback, link-local, multicast, or other internal targets unless the
+// administrator has explicitly opted in via ALLOW_PRIVATE_CHANNEL_BASEURL=true.
+func validateChannelBaseURL(rawURL string) error {
+	if os.Getenv("ALLOW_PRIVATE_CHANNEL_BASEURL") == "true" {
+		return nil
+	}
+	u, err := url.Parse(strings.TrimSpace(rawURL))
+	if err != nil {
+		return fmt.Errorf("base_url 解析失败: %v", err)
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return fmt.Errorf("base_url 仅支持 http/https，收到: %s", u.Scheme)
+	}
+	host := u.Hostname()
+	if host == "" {
+		return fmt.Errorf("base_url 缺少 host")
+	}
+	// 直接是 IP
+	if ip := net.ParseIP(host); ip != nil {
+		if isInternalIP(ip) {
+			return fmt.Errorf("base_url 指向内网/保留地址 %s，被 SSRF 防护拒绝。如确需，请联系系统管理员设置 ALLOW_PRIVATE_CHANNEL_BASEURL=true", host)
+		}
+		return nil
+	}
+	// 域名 — 解析所有 IP
+	ips, err := net.LookupIP(host)
+	if err != nil {
+		return fmt.Errorf("base_url 域名 %s 无法解析: %v", host, err)
+	}
+	for _, ip := range ips {
+		if isInternalIP(ip) {
+			return fmt.Errorf("base_url 域名 %s 解析到内网/保留地址 %s，被 SSRF 防护拒绝", host, ip.String())
+		}
+	}
+	return nil
+}
+
+func isInternalIP(ip net.IP) bool {
+	if ip == nil {
+		return true
+	}
+	if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() ||
+		ip.IsMulticast() || ip.IsUnspecified() || ip.IsInterfaceLocalMulticast() {
+		return true
+	}
+	// AWS / GCP / Azure 元数据
+	if ip.String() == "169.254.169.254" || ip.String() == "fd00:ec2::254" {
+		return true
+	}
+	return false
+}
+
 func validateChannel(channel *model.Channel, isAdd bool) error {
 	// 校验 channel settings
 	if err := channel.ValidateSettings(); err != nil {
 		return fmt.Errorf("渠道额外设置[channel setting] 格式错误：%s", err.Error())
+	}
+
+	// SECURITY (M-3): block private/loopback/metadata IPs in channel BaseURL.
+	// Even though only admins can set BaseURL, a compromised admin account
+	// can otherwise pivot to internal services (cloud metadata, redis, etc.).
+	if channel.BaseURL != nil && *channel.BaseURL != "" {
+		if err := validateChannelBaseURL(*channel.BaseURL); err != nil {
+			return err
+		}
 	}
 
 	// 如果是添加操作，检查 channel 和 key 是否为空
