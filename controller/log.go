@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"fmt"
 	"net/http"
 	"strconv"
 
@@ -157,11 +158,25 @@ func DeleteHistoryLogs(c *gin.Context) {
 		})
 		return
 	}
+	// SECURITY (H-5): record an immutable audit entry BEFORE the delete so that
+	// even if all matching log rows are wiped, the deletion event itself is
+	// preserved (a different table/record from the rows being deleted).
+	rootId := c.GetInt("id")
+	rootUsername := c.GetString("username")
+	model.RecordLog(rootId, model.LogTypeManage,
+		fmt.Sprintf("[AUDIT] root=%s(id=%d) requested DeleteHistoryLogs target_timestamp=%d ip=%s ua=%q",
+			rootUsername, rootId, targetTimestamp, c.ClientIP(), c.Request.UserAgent()))
+
 	count, err := model.DeleteOldLog(c.Request.Context(), targetTimestamp, 100)
 	if err != nil {
 		common.ApiError(c, err)
 		return
 	}
+	// post-event record (with actual count)
+	model.RecordLog(rootId, model.LogTypeManage,
+		fmt.Sprintf("[AUDIT] DeleteHistoryLogs completed by root=%s(id=%d): %d rows removed",
+			rootUsername, rootId, count))
+
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "",
