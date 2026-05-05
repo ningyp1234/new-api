@@ -403,6 +403,10 @@ func migrateLOGDB() error {
 	if err = LOG_DB.AutoMigrate(&Log{}); err != nil {
 		return err
 	}
+	// SECURITY: structured audit events table for DLP / login / ssrf / log_delete
+	if err = LOG_DB.AutoMigrate(&AuditEvent{}); err != nil {
+		return err
+	}
 	return nil
 }
 

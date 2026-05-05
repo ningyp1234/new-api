@@ -51,6 +51,15 @@ func Login(c *gin.Context) {
 	// SECURITY (M-4): account-level lockout — independent of IP rate limit.
 	if locked, ttl := isAccountLocked(username); locked {
 		common.SysLog(fmt.Sprintf("login blocked: account %q is locked for %ds", username, ttl))
+		// AUDIT: write structured event so dashboards can query
+		model.RecordAuditEvent(&model.AuditEvent{
+			EventType: model.AuditEventLoginBlocked,
+			Severity:  model.SeverityHigh,
+			Username:  username,
+			IP:        c.ClientIP(),
+			UserAgent: c.Request.UserAgent(),
+			Detail:    fmt.Sprintf(`{"ttl_seconds":%d}`, ttl),
+		})
 		c.JSON(http.StatusTooManyRequests, gin.H{
 			"success": false,
 			"message": fmt.Sprintf("账号已被临时锁定，请 %d 秒后再试", ttl),
@@ -64,7 +73,23 @@ func Login(c *gin.Context) {
 	err = user.ValidateAndFill()
 	if err != nil {
 		// Increment failure counter on any auth failure
-		recordFailedLogin(username)
+		newCount := recordFailedLogin(username)
+		// AUDIT: write structured event for the failure
+		severity := model.SeverityWarn
+		eventType := model.AuditEventLoginFail
+		if newCount >= loginLockoutThreshold() {
+			// This failure crossed the threshold and triggered lockout
+			severity = model.SeverityHigh
+			eventType = model.AuditEventLoginLockout
+		}
+		model.RecordAuditEvent(&model.AuditEvent{
+			EventType: eventType,
+			Severity:  severity,
+			Username:  username,
+			IP:        c.ClientIP(),
+			UserAgent: c.Request.UserAgent(),
+			Detail:    fmt.Sprintf(`{"failure_count":%d,"reason":"%s"}`, newCount, errString(err)),
+		})
 		switch {
 		case errors.Is(err, model.ErrDatabase):
 			common.SysLog(fmt.Sprintf("Login database error for user %s: %v", username, err))
@@ -77,7 +102,26 @@ func Login(c *gin.Context) {
 		return
 	}
 	// Successful login → reset failure counter
-	clearFailedLogin(username)
+	if cleared := clearFailedLogin(username); cleared > 0 {
+		// AUDIT: only record if there were prior failures (interesting forensic signal)
+		model.RecordAuditEvent(&model.AuditEvent{
+			EventType: model.AuditEventLockoutCleared,
+			Severity:  model.SeverityInfo,
+			UserId:    user.Id,
+			Username:  username,
+			IP:        c.ClientIP(),
+			Detail:    fmt.Sprintf(`{"cleared_failures":%d}`, cleared),
+		})
+	}
+	// Always record successful login as low-volume signal for forensics
+	model.RecordAuditEvent(&model.AuditEvent{
+		EventType: model.AuditEventLoginSuccess,
+		Severity:  model.SeverityInfo,
+		UserId:    user.Id,
+		Username:  user.Username,
+		IP:        c.ClientIP(),
+		UserAgent: c.Request.UserAgent(),
+	})
 
 	// 检查是否启用2FA
 	if model.IsTwoFAEnabled(user.Id) {
@@ -1317,23 +1361,47 @@ func isAccountLocked(username string) (bool, int) {
 	}
 	return false, 0
 }
-func recordFailedLogin(username string) {
+// recordFailedLogin returns the new failure counter value after incr.
+// 0 indicates redis unavailable / error path.
+func recordFailedLogin(username string) int {
 	if !common.RedisEnabled || common.RDB == nil {
-		return
+		return 0
 	}
 	ctx := context.Background()
 	key := loginFailKey(username)
 	count, err := common.RDB.Incr(ctx, key).Result()
 	if err != nil {
-		return
+		return 0
 	}
 	if count == 1 {
 		_ = common.RDB.Expire(ctx, key, time.Duration(loginLockoutWindow())*time.Second).Err()
 	}
+	return int(count)
 }
-func clearFailedLogin(username string) {
+
+// clearFailedLogin returns how many failures were cleared (for audit trail).
+// 0 = no prior failures (no event to record).
+func clearFailedLogin(username string) int {
 	if !common.RedisEnabled || common.RDB == nil {
-		return
+		return 0
 	}
-	_ = common.RDB.Del(context.Background(), loginFailKey(username)).Err()
+	ctx := context.Background()
+	key := loginFailKey(username)
+	prior, _ := common.RDB.Get(ctx, key).Int()
+	_ = common.RDB.Del(ctx, key).Err()
+	return prior
+}
+
+// errString — small helper used by audit events to summarize errors safely.
+func errString(err error) string {
+	if err == nil {
+		return ""
+	}
+	s := err.Error()
+	// truncate to keep audit detail JSON compact
+	if len(s) > 100 {
+		s = s[:100]
+	}
+	// escape JSON-unsafe chars minimally
+	return strings.ReplaceAll(strings.ReplaceAll(s, `"`, `'`), "\n", " ")
 }
