@@ -46,15 +46,28 @@ func InitEnv() {
 		os.Exit(0)
 	}
 
-	if os.Getenv("SESSION_SECRET") != "" {
-		ss := os.Getenv("SESSION_SECRET")
-		if ss == "random_string" {
-			log.Println("WARNING: SESSION_SECRET is set to the default value 'random_string', please change it to a random string.")
-			log.Println("警告：SESSION_SECRET被设置为默认值'random_string'，请修改为随机字符串。")
-			log.Fatal("Please set SESSION_SECRET to a random string.")
-		} else {
-			SessionSecret = ss
+	// SECURITY (M-1): SESSION_SECRET must be explicitly set in production.
+	// Without it, every restart generates a fresh secret → all sessions
+	// invalidated. In multi-replica deployments, each replica picks a
+	// different secret → users randomly logged out depending on which
+	// replica routes them. Both are bad operational surprises.
+	envSecret := os.Getenv("SESSION_SECRET")
+	if envSecret == "" {
+		// Allow opt-out only when explicitly running in dev mode
+		if os.Getenv("DEV_ALLOW_RANDOM_SESSION_SECRET") != "true" {
+			log.Fatal("SECURITY: SESSION_SECRET environment variable is required. " +
+				"Generate one with: openssl rand -base64 36. " +
+				"To skip this check in dev only, set DEV_ALLOW_RANDOM_SESSION_SECRET=true")
 		}
+		log.Println("WARNING: running with random SESSION_SECRET (DEV_ALLOW_RANDOM_SESSION_SECRET=true). All sessions will be invalidated on restart.")
+	} else if envSecret == "random_string" {
+		log.Println("WARNING: SESSION_SECRET is set to the default value 'random_string', please change it to a random string.")
+		log.Println("警告：SESSION_SECRET被设置为默认值'random_string'，请修改为随机字符串。")
+		log.Fatal("Please set SESSION_SECRET to a random string.")
+	} else if len(envSecret) < 32 {
+		log.Fatal("SECURITY: SESSION_SECRET is too short (< 32 chars). Generate a stronger one with: openssl rand -base64 36")
+	} else {
+		SessionSecret = envSecret
 	}
 	if os.Getenv("CRYPTO_SECRET") != "" {
 		CryptoSecret = os.Getenv("CRYPTO_SECRET")
@@ -83,6 +96,17 @@ func InitEnv() {
 	MemoryCacheEnabled = os.Getenv("MEMORY_CACHE_ENABLED") == "true"
 	IsMasterNode = os.Getenv("NODE_TYPE") != "slave"
 	NodeName = os.Getenv("NODE_NAME")
+	// P0 D1: prompt 归档开关（默认 opt-in）
+	PromptArchiveEnabled = GetEnvOrDefaultBool("PROMPT_ARCHIVE_ENABLED", false)
+	PromptArchiveRetentionDays = GetEnvOrDefault("PROMPT_ARCHIVE_RETENTION_DAYS", 90)
+	if PromptArchiveEnabled {
+		SysLog("PromptArchive enabled: full prompt + completion 落盘归档；raw 字段加密 + " +
+			GetEnvOrDefaultString("PROMPT_ARCHIVE_RETENTION_DAYS", "90") + " 天后过期")
+		if CryptoSecret == "" {
+			SysError("PromptArchive enabled but CRYPTO_SECRET is empty — raw fields will fall back to plaintext! Set CRYPTO_SECRET env var.")
+		}
+	}
+
 	TLSInsecureSkipVerify = GetEnvOrDefaultBool("TLS_INSECURE_SKIP_VERIFY", false)
 	if TLSInsecureSkipVerify {
 		if tr, ok := http.DefaultTransport.(*http.Transport); ok && tr != nil {

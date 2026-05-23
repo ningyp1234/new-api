@@ -471,4 +471,9 @@ func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 		Group:            relayInfo.UsingGroup,
 		Other:            other,
 	})
+
+	// P0 D2: prompt + completion 全文归档（异步、不阻塞主链路、
+	// PROMPT_ARCHIVE_ENABLED=false 时零开销直接 return）
+	PromptArchiveCommit(ctx, relayInfo, logModel,
+		summary.PromptTokens, summary.CompletionTokens, int(summary.UseTimeSeconds))
 }

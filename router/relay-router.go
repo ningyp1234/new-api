@@ -71,6 +71,10 @@ func SetRelayRouter(router *gin.Engine) {
 	relayV1Router.Use(middleware.SystemPerformanceCheck())
 	relayV1Router.Use(middleware.TokenAuth())
 	relayV1Router.Use(middleware.ModelRequestRateLimit())
+	// P0 D2: 装 tee writer 抓取 completion 响应。当 PROMPT_ARCHIVE_ENABLED=false
+	// 时 middleware 直接 c.Next() 零开销；只对 chat/completions、messages、responses
+	// 等会产生文本 completion 的接口装 wrapper
+	relayV1Router.Use(middleware.PromptArchiveResponseCapture())
 	{
 		// WebSocket 路由（统一到 Relay）
 		wsRouter := relayV1Router.Group("")

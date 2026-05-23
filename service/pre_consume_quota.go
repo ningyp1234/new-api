@@ -1,6 +1,7 @@
 package service
 
 import (
+	"time"
 	"fmt"
 	"net/http"
 
@@ -56,10 +57,14 @@ func PreConsumeQuota(c *gin.Context, preConsumedQuota int, relayInfo *relaycommo
 				logger.LogInfo(c, fmt.Sprintf("用户 %d 剩余额度 %s 且令牌 %d 额度 %d 充足, 信任且不需要预扣费", relayInfo.UserId, logger.FormatQuota(userQuota), relayInfo.TokenId, tokenQuota))
 			}
 		} else {
-			// in this case, we do not pre-consume quota
-			// because the user has enough quota
+			// SECURITY (H-4): trust path bypasses pre-consume; cap concurrent
+			// in-flight calls per user to prevent overdraft via burst concurrency.
+			// 用 redis INCR + TTL 实现 sliding window.
+			if err := acquireTrustInflightSlot(c, relayInfo.UserId); err != nil {
+				return types.NewErrorWithStatusCode(err, types.ErrorCodeInsufficientUserQuota, http.StatusTooManyRequests, types.ErrOptionWithSkipRetry(), types.ErrOptionWithNoRecordErrorLog())
+			}
 			preConsumedQuota = 0
-			logger.LogInfo(c, fmt.Sprintf("用户 %d 额度充足且为无限额度令牌, 信任且不需要预扣费", relayInfo.UserId))
+			logger.LogInfo(c, fmt.Sprintf("用户 %d 额度充足且为无限额度令牌, 信任且不需要预扣费 (inflight slot acquired)", relayInfo.UserId))
 		}
 	}
 
@@ -76,4 +81,53 @@ func PreConsumeQuota(c *gin.Context, preConsumedQuota int, relayInfo *relaycommo
 	}
 	relayInfo.FinalPreConsumedQuota = preConsumedQuota
 	return nil
+}
+
+
+// SECURITY (H-4): cap concurrent in-flight requests for users on the trust path.
+// Default 20 concurrent requests per user; configurable via TRUST_INFLIGHT_LIMIT env.
+// We use a redis counter with a 60s TTL ceiling so a crashed handler eventually
+// frees its slot. Falls back to allow-all if redis is unavailable (graceful
+// degradation; the audit logging still records the usage).
+func acquireTrustInflightSlot(c *gin.Context, userId int) error {
+	if !common.RedisEnabled || common.RDB == nil {
+		return nil
+	}
+	limit := common.GetEnvOrDefault("TRUST_INFLIGHT_LIMIT", 20)
+	if limit < 1 {
+		limit = 20
+	}
+	key := fmt.Sprintf("trust_inflight:%d", userId)
+	ctx := c.Request.Context()
+	count, err := common.RDB.Incr(ctx, key).Result()
+	if err != nil {
+		// graceful degradation
+		return nil
+	}
+	if count == 1 {
+		// First INCR — set safety TTL
+		_ = common.RDB.Expire(ctx, key, 60*time.Second).Err()
+	}
+	// Decrement on response — best-effort via gin "after" hook
+	c.Set("trust_inflight_release", true)
+	c.Set("trust_inflight_user", userId)
+	if int(count) > limit {
+		// release immediately and reject
+		_ = common.RDB.Decr(ctx, key).Err()
+		return fmt.Errorf("超出并发限制 (max %d in-flight requests for trusted user)", limit)
+	}
+	return nil
+}
+
+// ReleaseTrustInflight should be called from the response cleanup path.
+func ReleaseTrustInflight(c *gin.Context) {
+	if !common.GetContextKeyBool(c, "trust_inflight_release") {
+		return
+	}
+	uid := c.GetInt("trust_inflight_user")
+	if uid <= 0 || common.RDB == nil {
+		return
+	}
+	key := fmt.Sprintf("trust_inflight:%d", uid)
+	_ = common.RDB.Decr(c.Request.Context(), key).Err()
 }

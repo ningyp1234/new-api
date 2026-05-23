@@ -38,6 +38,41 @@ import { useTranslation } from 'react-i18next';
 
 const { Text, Title } = Typography;
 
+const PASSWORD_RULE_TEXT =
+  '密码至少 12 位，且必须包含大写字母、小写字母、数字和符号';
+
+const getPasswordValidationMessage = (value) => {
+  const problems = [];
+  const length = Array.from(value || '').length;
+  if (length < 12) {
+    problems.push(`长度不足：当前 ${length} 位，至少需要 12 位`);
+  }
+  if (!/[A-Z]/.test(value)) {
+    problems.push('缺少大写字母');
+  }
+  if (!/[a-z]/.test(value)) {
+    problems.push('缺少小写字母');
+  }
+  if (!/\d/.test(value)) {
+    problems.push('缺少数字');
+  }
+  if (!/[\p{P}\p{S}]/u.test(value)) {
+    problems.push('缺少符号，例如 ! @ # $ %');
+  }
+  return problems.length > 0 ? `密码不符合要求：${problems.join('；')}` : '';
+};
+
+const validatePassword = (value) => {
+  if (!value) {
+    return Promise.resolve();
+  }
+  const message = getPasswordValidationMessage(value);
+  if (!message) {
+    return Promise.resolve();
+  }
+  return Promise.reject(message);
+};
+
 const AddUserModal = (props) => {
   const { t } = useTranslation();
   const formApiRef = useRef(null);
@@ -160,8 +195,14 @@ const AddUserModal = (props) => {
                       field='password'
                       label={t('密码')}
                       type='password'
-                      placeholder={t('请输入密码')}
-                      rules={[{ required: true, message: t('请输入密码') }]}
+                      placeholder={t('例如：TestPass123!')}
+                      extraText={t(PASSWORD_RULE_TEXT)}
+                      rules={[
+                        { required: true, message: t('请输入密码') },
+                        {
+                          validator: (rule, value) => validatePassword(value),
+                        },
+                      ]}
                       showClear
                     />
                   </Col>

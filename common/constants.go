@@ -93,6 +93,15 @@ var MemoryCacheEnabled bool
 
 var LogConsumeEnabled = true
 
+// PromptArchiveEnabled — P0 D1: 是否启用 prompt + completion 全文归档落盘
+// 默认关闭（opt-in），生产前需通过 env PROMPT_ARCHIVE_ENABLED=true 显式开启
+// 启用前必须确认: (1) CRYPTO_SECRET 已设置 (2) DLP M-1 已配置敏感词库 (3) 存储容量充足
+var PromptArchiveEnabled = false
+
+// PromptArchiveRetentionDays — raw 加密字段保留天数，过期由定时任务清空（脱敏版永久保留）
+// 默认 90 天，可通过 env PROMPT_ARCHIVE_RETENTION_DAYS 调整
+var PromptArchiveRetentionDays = 90
+
 var TLSInsecureSkipVerify bool
 var InsecureTLSConfig = &tls.Config{InsecureSkipVerify: true}
 

@@ -3909,6 +3909,32 @@
     "Your Turnstile site key": "您的 Turnstile 站点密钥",
     "Zhipu": "智谱",
     "Zhipu V4": "智谱 V4",
-    "Zoom": "缩放"
+    "Zoom": "缩放",
+
+    "My Prompt History": "我的 Prompt 历史",
+    "Every chat completion you call is archived. Use this page to review your prompt history, find best practices, and reuse high-quality prompts as templates.": "你每次调用 chat completion 都会被归档到这里。在此回顾你的 prompt 历史，发现最佳实践，把高质量 prompt 复用为模板。",
+    "Top prompts in your group": "组内热门 Prompt",
+    "last 7 days": "最近 7 天",
+    "Aggregated by prompt hash across your group — copy to reuse.": "按组内 prompt hash 聚合 — 点击复制即可复用。",
+    "Search prompt or completion...": "搜索 prompt 或回答...",
+    "Filter by model": "按模型过滤",
+    "All models": "所有模型",
+    "All time": "全部时间",
+    "Last 7 days": "最近 7 天",
+    "Last 30 days": "最近 30 天",
+    "Time": "时间",
+    "Tokens": "Tokens",
+    "Prompt": "Prompt",
+    "Completion": "回答",
+    "No prompt history yet.": "暂无 prompt 历史",
+    "Failed to load prompts": "加载 prompt 历史失败",
+    "Failed to load detail": "加载详情失败",
+    "Copy as template": "复制为模板",
+    "Copied to clipboard": "已复制到剪贴板",
+    "Copy failed": "复制失败",
+    "Prompt Detail": "Prompt 详情",
+    "Use time": "耗时",
+    "reuse": "次复用",
+    "{{total}} total": "共 {{total}} 条"
   }
 }

@@ -61,6 +61,46 @@ function DynamicOAuth2Callback() {
   return <OAuth2Callback type={provider} />;
 }
 
+// P0 D8 — 我的 Prompt 历史
+// 通过 iframe 内嵌已经 production-ready 的 /landing/prompts.html
+// 把当前登录用户的 id 通过 URL ?uid=X 传给 iframe，
+// iframe 内 HTML 会自动写 localStorage.uid 完成认证。
+function PromptHistoryIframe() {
+  let uid = '';
+  try {
+    const u = JSON.parse(localStorage.getItem('user') || '{}');
+    uid = u?.id || '';
+  } catch (e) {
+    /* ignore */
+  }
+  const src = `/landing/prompts.html?uid=${uid}&embedded=1`;
+  return (
+    <div
+      style={{
+        position: 'fixed',
+        top: 64,
+        left: 240, // sidebar width，按 classic 主题 sidebar 宽度
+        right: 0,
+        bottom: 0,
+        background: '#fff',
+      }}
+    >
+      <iframe
+        src={src}
+        title='My Prompt History'
+        style={{
+          width: '100%',
+          height: '100%',
+          border: 'none',
+          background: 'transparent',
+          display: 'block',
+        }}
+        sandbox='allow-same-origin allow-scripts allow-popups allow-forms allow-modals'
+      />
+    </div>
+  );
+}
+
 function App() {
   const location = useLocation();
   const [statusState] = useContext(StatusContext);
@@ -282,6 +322,14 @@ function App() {
           element={
             <PrivateRoute>
               <Log />
+            </PrivateRoute>
+          }
+        />
+        <Route
+          path='/console/prompts'
+          element={
+            <PrivateRoute>
+              <PromptHistoryIframe />
             </PrivateRoute>
           }
         />

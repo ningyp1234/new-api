@@ -46,6 +46,14 @@ var classicBuildFS embed.FS
 //go:embed web/classic/dist/index.html
 var classicIndexPage []byte
 
+// Landing v1.0 — 营销落地页，独立于 React 主前端，挂在 /landing 路径
+//
+//go:embed web/landing
+var landingBuildFS embed.FS
+
+//go:embed web/landing/index.html
+var landingIndexPage []byte
+
 func main() {
 	startTime := time.Now()
 
@@ -118,6 +126,9 @@ func main() {
 	// Subscription quota reset task (daily/weekly/monthly/custom)
 	service.StartSubscriptionQuotaResetTask()
 
+	// P0 D4: prompt_archive raw 字段过期清理（每天凌晨 3 点跑一次）
+	service.StartPromptArchivePurgeTask()
+
 	// Wire task polling adaptor factory (breaks service -> relay import cycle)
 	service.GetTaskAdaptorFunc = func(platform constant.TaskPlatform) service.TaskPollingAdaptor {
 		a := relay.GetTaskAdaptor(platform)
@@ -175,12 +186,24 @@ func main() {
 	server.Use(middleware.I18n())
 	middleware.SetUpLogger(server)
 	// Initialize session store
+	// SECURITY (H-1): Secure flag is auto-derived from SERVER_ADDRESS env var.
+	// Production deployments behind https → Secure=true automatically.
+	// Allow explicit override via FORCE_SECURE_COOKIE=true|false.
+	cookieSecure := strings.HasPrefix(strings.ToLower(os.Getenv("SERVER_ADDRESS")), "https://")
+	if v := os.Getenv("FORCE_SECURE_COOKIE"); v != "" {
+		cookieSecure = (v == "true" || v == "1")
+	}
+	if cookieSecure {
+		common.SysLog("session cookie Secure=true (https detected)")
+	} else {
+		common.SysLog("WARNING: session cookie Secure=false; only safe for local/internal HTTP. Set SERVER_ADDRESS=https://... in production")
+	}
 	store := cookie.NewStore([]byte(common.SessionSecret))
 	store.Options(sessions.Options{
 		Path:     "/",
 		MaxAge:   2592000, // 30 days
 		HttpOnly: true,
-		Secure:   false,
+		Secure:   cookieSecure,
 		SameSite: http.SameSiteStrictMode,
 	})
 	server.Use(sessions.Sessions("session", store))
@@ -194,6 +217,8 @@ func main() {
 		DefaultIndexPage: indexPage,
 		ClassicBuildFS:   classicBuildFS,
 		ClassicIndexPage: classicIndexPage,
+		LandingBuildFS:   landingBuildFS,
+		LandingIndexPage: landingIndexPage,
 	})
 	var port = os.Getenv("PORT")
 	if port == "" {
@@ -285,6 +310,15 @@ func InitResources() error {
 
 	model.CheckSetup()
 
+	// SECURITY (H-3): one-time migration to encrypt any plaintext channel.Key
+	// values left over from older deployments. Idempotent — already-encrypted
+	// rows are skipped.
+	if migrated, mErr := model.MigrateChannelKeysToEncrypted(); mErr != nil {
+		common.SysLog("WARN: channel key encryption migration failed: " + mErr.Error())
+	} else if migrated > 0 {
+		common.SysLog(fmt.Sprintf("encrypted %d legacy plaintext channel keys at rest", migrated))
+	}
+
 	// Initialize options, should after model.InitDB()
 	model.InitOptionMap()
 
@@ -329,3 +363,4 @@ func InitResources() error {
 
 	return nil
 }
+// build-trigger 1778334668

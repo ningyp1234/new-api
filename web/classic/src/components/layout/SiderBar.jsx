@@ -39,6 +39,7 @@ const routerMap = {
   user: '/console/user',
   subscription: '/console/subscription',
   log: '/console/log',
+  prompts: '/console/prompts',
   midjourney: '/console/midjourney',
   setting: '/console/setting',
   about: '/about',
@@ -90,6 +91,11 @@ const SiderBar = ({ onNavigate = () => {} }) => {
         to: '/log',
       },
       {
+        text: t('Prompt 历史'),
+        itemKey: 'prompts',
+        to: '/prompts',
+      },
+      {
         text: t('绘图日志'),
         itemKey: 'midjourney',
         to: '/midjourney',
@@ -108,7 +114,10 @@ const SiderBar = ({ onNavigate = () => {} }) => {
     ];
 
     // 根据配置过滤项目
+    // P0 D8: 'prompts' 是 newapi 之后才加的菜单，老用户的 sidebar_modules 配置里
+    // 没这个 key，isModuleVisible 会返回 false 把它过滤掉。直接 bypass 这个 key。
     const filteredItems = items.filter((item) => {
+      if (item.itemKey === 'prompts') return true; // 新功能：始终可见
       const configVisible = isModuleVisible('console', item.itemKey);
       return configVisible;
     });

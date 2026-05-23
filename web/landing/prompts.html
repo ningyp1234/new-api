@@ -1,0 +1,906 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>我的 Prompt 历史 — NeuToken</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+         background: #f5f7fa; color: #2c3e50; padding: 24px; line-height: 1.6; }
+  .container { max-width: 1280px; margin: 0 auto; }
+  header { background: linear-gradient(135deg, #667eea, #764ba2); color: white;
+           padding: 24px 32px; border-radius: 12px; margin-bottom: 20px;
+           box-shadow: 0 4px 16px rgba(102,126,234,.3); }
+  header h1 { font-size: 24px; margin-bottom: 6px; }
+  header .desc { font-size: 13px; opacity: 0.9; }
+
+  .card { background: white; border-radius: 10px; padding: 16px 20px;
+          margin-bottom: 16px; box-shadow: 0 2px 8px rgba(0,0,0,.06); }
+
+  .analytics-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));
+                    gap: 12px; margin-bottom: 16px; }
+  .metric { background: white; border-radius: 10px; padding: 14px 16px;
+            box-shadow: 0 2px 8px rgba(0,0,0,.06); border-left: 3px solid #667eea; }
+  .metric .label { font-size: 12px; color: #748196; margin-bottom: 4px; }
+  .metric .value { font-size: 24px; font-weight: 700; color: #26364d; line-height: 1.2; }
+  .metric .sub { font-size: 12px; color: #8a96a8; margin-top: 4px; }
+  .analytics-panels { display: grid; grid-template-columns: 1.25fr 1fr 1fr;
+                      gap: 12px; margin-bottom: 16px; }
+  .panel { background: white; border-radius: 10px; padding: 14px 16px;
+           box-shadow: 0 2px 8px rgba(0,0,0,.06); min-width: 0; }
+  .panel h3 { font-size: 13px; color: #536075; margin-bottom: 10px; }
+  .bar-row { display: grid; grid-template-columns: minmax(70px, 1fr) 3fr 54px;
+             gap: 8px; align-items: center; margin-bottom: 8px; font-size: 12px; }
+  .bar-label { color: #475569; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .bar-track { height: 7px; background: #eef2f7; border-radius: 99px; overflow: hidden; }
+  .bar-fill { height: 100%; background: #667eea; border-radius: inherit; min-width: 2px; }
+  .bar-value { color: #64748b; text-align: right; font-family: ui-monospace, monospace; }
+  .trend { display: flex; align-items: flex-end; gap: 4px; height: 72px; padding-top: 8px; }
+  .trend-bar { flex: 1; min-width: 4px; background: #8ea0ff; border-radius: 4px 4px 0 0; }
+  .trend-empty { color: #99a3b3; font-size: 12px; padding: 12px 0; }
+  .risk-line { display: flex; justify-content: space-between; gap: 10px;
+               font-size: 12px; color: #536075; padding: 4px 0; }
+  .risk-line strong { color: #26364d; font-family: ui-monospace, monospace; }
+
+  .hot-card { background: linear-gradient(135deg, #fff7e6, #fff); }
+  .hot-card h3 { color: #d4660a; font-size: 14px; margin-bottom: 10px; }
+  .hot-item { display: flex; gap: 10px; padding: 8px 12px; background: #f9f9fb;
+              border-radius: 6px; margin-bottom: 6px; align-items: center; font-size: 13px; }
+  .hot-item .rank { color: #999; font-family: ui-monospace, monospace; font-weight: 600; min-width: 28px; }
+  .hot-item .text { flex: 1; word-break: break-all; }
+  .hot-item .count { background: #ff8a4c; color: white; font-size: 11px;
+                     padding: 2px 8px; border-radius: 10px; white-space: nowrap; }
+  .insight-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 16px; }
+  .insight-list { display: grid; gap: 8px; }
+  .insight-item { border: 1px solid #edf1f6; border-radius: 8px; padding: 10px 12px;
+                  background: #fbfcff; font-size: 12px; color: #526176; }
+  .insight-item strong { display: block; color: #26364d; font-size: 13px; margin-bottom: 3px; }
+  .insight-item .muted { color: #8491a5; }
+  .issue-row { display: grid; grid-template-columns: minmax(90px, 1fr) 42px; gap: 8px;
+               padding: 7px 0; border-bottom: 1px solid #f0f3f7; font-size: 12px; }
+  .issue-row:last-child { border-bottom: 0; }
+  .issue-row span { color: #526176; }
+  .issue-row strong { text-align: right; color: #26364d; font-family: ui-monospace, monospace; }
+  .recommendations { margin: 0; padding-left: 18px; color: #526176; font-size: 12px; }
+  .recommendations li { margin: 5px 0; }
+
+  .filters { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+  input, select, button { font-size: 14px; padding: 8px 12px;
+          border: 1px solid #d8dde5; border-radius: 6px; background: white; }
+  input { flex: 1; min-width: 240px; }
+  button { background: #667eea; color: white; border-color: #667eea;
+           cursor: pointer; font-weight: 500; }
+  button:hover { background: #5568c8; }
+  button.ghost { background: white; color: #667eea; }
+
+  table { width: 100%; border-collapse: collapse; }
+  thead { background: #f9fafc; border-bottom: 2px solid #e8ecf0; }
+  th, td { padding: 11px 14px; text-align: left; font-size: 13px; }
+  th { color: #555; font-weight: 600; }
+  tbody tr { border-bottom: 1px solid #f0f3f7; cursor: pointer; transition: background .1s; }
+  tbody tr:hover { background: #f9fafc; }
+  td.preview { max-width: 280px; overflow: hidden; text-overflow: ellipsis;
+               white-space: nowrap; color: #586e89; }
+  td.tokens { font-family: ui-monospace, monospace; font-size: 12px; color: #888; }
+  td.time { font-family: ui-monospace, monospace; font-size: 12px; color: #444; white-space: nowrap; }
+
+  .badge { display: inline-block; font-size: 11px; padding: 2px 7px; border-radius: 10px;
+           margin-right: 4px; font-weight: 500; }
+  .badge.stream { background: #e3e9ff; color: #4458b8; }
+  .badge.dlp { background: #ffe4e4; color: #c92a2a; }
+  .badge.lang { background: #e8f5e9; color: #2e7d32; }
+
+  .pagination { display: flex; justify-content: space-between; align-items: center;
+                padding: 12px 16px; }
+  .pagination .info { color: #888; font-size: 13px; }
+  .pagination button { margin-left: 8px; }
+  .pagination button:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  .empty, .loading { text-align: center; padding: 60px 20px; color: #999; }
+
+  /* modal */
+  .modal-bg { position: fixed; inset: 0; background: rgba(0,0,0,.5);
+              display: none; align-items: flex-start; justify-content: center;
+              padding: 40px 20px; z-index: 1000; overflow-y: auto; }
+  .modal-bg.open { display: flex; }
+  .modal { background: white; border-radius: 10px; max-width: 800px; width: 100%;
+           padding: 24px; box-shadow: 0 10px 40px rgba(0,0,0,.2); }
+  .modal h2 { font-size: 18px; margin-bottom: 4px; }
+  .modal .meta { font-size: 12px; color: #999; margin-bottom: 16px;
+                 padding-bottom: 12px; border-bottom: 1px solid #eee; }
+  .modal .meta-item { display: inline-block; margin-right: 16px; }
+  .modal .section { margin-bottom: 18px; }
+  .modal .section-head { display: flex; justify-content: space-between;
+                          align-items: center; margin-bottom: 8px; }
+  .modal .section-head h3 { font-size: 14px; color: #333; }
+  .modal pre { background: #f7f9fc; padding: 14px; border-radius: 6px;
+               max-height: 280px; overflow-y: auto; font-size: 13px;
+               white-space: pre-wrap; word-break: break-all; line-height: 1.6;
+               font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+  .modal .close-btn { float: right; background: white; color: #666; border: 1px solid #ddd;
+                       padding: 6px 14px; }
+
+  .alert { padding: 12px 16px; border-radius: 6px; margin-bottom: 16px;
+           background: #fff3cd; color: #856404; font-size: 13px; }
+  .alert.error { background: #f8d7da; color: #721c24; }
+
+  @media (max-width: 980px) {
+    .analytics-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .analytics-panels { grid-template-columns: 1fr; }
+    .insight-grid { grid-template-columns: 1fr; }
+  }
+  @media (max-width: 560px) {
+    body { padding: 12px; }
+    .analytics-grid { grid-template-columns: 1fr; }
+    th, td { padding: 9px 10px; }
+  }
+</style>
+</head>
+<body>
+<div class="container">
+  <header style="position:relative">
+    <h1>📚 我的 Prompt 历史</h1>
+    <div class="desc">每次 AI 调用都被归档。回顾你的 prompt 历史，发现最佳实践，复用高质量模板。</div>
+    <a href="/console" style="position:absolute; top:24px; right:32px;
+       background:rgba(255,255,255,.2); color:white; padding:8px 16px;
+       border-radius:6px; text-decoration:none; font-size:13px; font-weight:500;
+       backdrop-filter: blur(4px); transition: background .2s;"
+       onmouseover="this.style.background='rgba(255,255,255,.3)'"
+       onmouseout="this.style.background='rgba(255,255,255,.2)'">🏠 主控制台 ↗</a>
+  </header>
+
+  <div id="auth-alert" class="alert" style="display:none; background:white; padding:32px;
+       border-radius:10px; max-width:420px; margin:40px auto; box-shadow:0 4px 20px rgba(0,0,0,.08);">
+    <h2 style="margin:0 0 6px 0; font-size:20px; color:#333">🔐 登录</h2>
+    <p style="margin:0 0 20px 0; color:#888; font-size:13px;">登录后查看你的 Prompt 历史</p>
+
+    <div style="margin-bottom:12px;">
+      <label style="display:block; font-size:12px; color:#555; margin-bottom:4px;">用户名</label>
+      <input id="login-user" type="text" autocomplete="username" placeholder="admin"
+             style="width:100%; padding:10px 12px; border:1px solid #d8dde5; border-radius:6px;
+                    font-size:14px; box-sizing:border-box;">
+    </div>
+    <div style="margin-bottom:16px;">
+      <label style="display:block; font-size:12px; color:#555; margin-bottom:4px;">密码</label>
+      <input id="login-pass" type="password" autocomplete="current-password"
+             style="width:100%; padding:10px 12px; border:1px solid #d8dde5; border-radius:6px;
+                    font-size:14px; box-sizing:border-box;">
+    </div>
+
+    <button id="login-btn" onclick="doLogin()" style="width:100%; background:#667eea; color:white;
+       border:none; padding:11px; border-radius:6px; cursor:pointer; font-size:14px;
+       font-weight:600;">登录</button>
+
+    <div id="login-err" style="display:none; color:#c92a2a; font-size:13px; margin-top:12px;
+         background:#ffe4e4; padding:10px; border-radius:6px;"></div>
+
+    <div style="margin-top:18px; padding-top:16px; border-top:1px solid #eee; font-size:12px;
+         color:#999; text-align:center;">
+      已通过主控制台登录？
+      <a href="javascript:checkAndReload()" style="color:#667eea; text-decoration:none;">点这里刷新本页</a>
+    </div>
+  </div>
+
+  <div id="hot-section"></div>
+
+  <div id="analytics-section">
+    <div class="analytics-grid" id="analytics-metrics"></div>
+    <div class="analytics-panels">
+      <div class="panel">
+        <h3>每日调用趋势</h3>
+        <div id="daily-trend" class="trend-empty">加载中…</div>
+      </div>
+      <div class="panel">
+        <h3>模型分布</h3>
+        <div id="model-bars" class="trend-empty">加载中…</div>
+      </div>
+      <div class="panel">
+        <h3>审计风险</h3>
+        <div id="risk-panel" class="trend-empty">加载中…</div>
+      </div>
+      <div class="panel">
+        <h3>语言分布</h3>
+        <div id="language-bars" class="trend-empty">加载中…</div>
+      </div>
+      <div class="panel">
+        <h3>Prompt Token 分布</h3>
+        <div id="token-bars" class="trend-empty">加载中…</div>
+      </div>
+    </div>
+  </div>
+
+  <div id="insights-section">
+    <div class="analytics-grid" id="quality-metrics"></div>
+    <div class="insight-grid">
+      <div class="panel">
+        <h3>输入质量问题</h3>
+        <div id="prompt-issues" class="trend-empty">加载中…</div>
+      </div>
+      <div class="panel">
+        <h3>输出反馈问题</h3>
+        <div id="completion-issues" class="trend-empty">加载中…</div>
+      </div>
+      <div class="panel">
+        <h3>高频输入汇总</h3>
+        <div id="high-frequency" class="trend-empty">加载中…</div>
+      </div>
+      <div class="panel">
+        <h3>Skill 候选</h3>
+        <div id="skill-candidates" class="trend-empty">加载中…</div>
+      </div>
+    </div>
+    <div class="panel" style="margin-bottom:16px">
+      <h3>团队提升建议</h3>
+      <ul id="quality-recommendations" class="recommendations"><li>加载中…</li></ul>
+    </div>
+  </div>
+
+  <div class="card" id="filters-card">
+    <div class="filters">
+      <input id="keyword" placeholder="🔎 搜索 prompt 或回答内容…" />
+      <select id="model"><option value="">所有模型</option></select>
+      <select id="range">
+        <option value="0">全部时间</option>
+        <option value="7">最近 7 天</option>
+        <option value="30">最近 30 天</option>
+      </select>
+      <button onclick="loadList()">搜索</button>
+    </div>
+  </div>
+
+  <div class="card" id="table-card" style="padding:0">
+    <table>
+      <thead>
+        <tr>
+          <th style="width:170px">⏱ 时间</th>
+          <th style="width:120px">🤖 模型</th>
+          <th>💬 Prompt</th>
+          <th>✏️ Completion</th>
+          <th style="width:110px">Tokens</th>
+          <th style="width:160px">状态</th>
+        </tr>
+      </thead>
+      <tbody id="rows">
+        <tr><td colspan="6" class="loading">加载中…</td></tr>
+      </tbody>
+    </table>
+    <div class="pagination">
+      <span class="info" id="pagination-info">—</span>
+      <div>
+        <button class="ghost" id="prev-btn" onclick="changePage(-1)">上一页</button>
+        <button class="ghost" id="next-btn" onclick="changePage(1)">下一页</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="modal-bg" id="modal" onclick="closeModal(event)">
+  <div class="modal" onclick="event.stopPropagation()">
+    <button class="close-btn" onclick="closeModal()">关闭</button>
+    <h2>Prompt 详情</h2>
+    <div class="meta" id="modal-meta">—</div>
+    <div class="section">
+      <div class="section-head">
+        <h3>💬 Prompt</h3>
+        <button onclick="copyText('prompt')">📋 复制为模板</button>
+      </div>
+      <pre id="modal-prompt">—</pre>
+    </div>
+    <div class="section">
+      <div class="section-head">
+        <h3>✏️ Completion</h3>
+        <button onclick="copyText('completion')">📋 复制</button>
+      </div>
+      <pre id="modal-completion">—</pre>
+    </div>
+  </div>
+</div>
+
+<script>
+// =============================================
+// 状态 + 配置
+// =============================================
+const PAGE_SIZE = 20;
+const state = {
+  uid: null,
+  page: 1,
+  total: 0,
+  analytics: null,
+  insights: null,
+  modelOptions: new Set(),
+  currentDetail: null,
+};
+
+// =============================================
+// 工具
+// =============================================
+function formatTime(unixSec) {
+  const d = new Date(unixSec * 1000);
+  return d.toLocaleString('zh-CN');
+}
+function preview(s, max=60) {
+  if (!s) return '';
+  return s.length <= max ? s : s.slice(0, max) + '…';
+}
+function formatNumber(n) {
+  return Number(n || 0).toLocaleString('zh-CN');
+}
+function formatPercent(v) {
+  return ((Number(v || 0)) * 100).toFixed(1) + '%';
+}
+function escapeHtml(s) {
+  return String(s||'').replace(/[&<>"']/g, c =>
+    ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+function getCommonHeaders() {
+  const h = { 'Content-Type': 'application/json' };
+  if (state.uid) h['New-Api-User'] = String(state.uid);
+  return h;
+}
+
+// =============================================
+// API 调用
+// =============================================
+async function api(path) {
+  const res = await fetch(path, {
+    headers: getCommonHeaders(),
+    credentials: 'include',
+  });
+  if (!res.ok) throw new Error('HTTP ' + res.status);
+  const data = await res.json();
+  if (!data.success) throw new Error(data.message || '请求失败');
+  return data.data;
+}
+
+// =============================================
+// 初始化：从 localStorage 拿 user_id（newapi 主前端登录后会写入）
+// =============================================
+// 在 iframe 内嵌运行时（被 React 路由 /prompts/me 框入），隐藏自己的 header 避免双标题
+const IS_EMBEDDED = (function() {
+  try {
+    return window.self !== window.top
+      || new URLSearchParams(location.search).get('embedded') === '1';
+  } catch { return true; }
+})();
+
+function applyEmbeddedStyles() {
+  if (!IS_EMBEDDED) return;
+  const hdr = document.querySelector('header');
+  if (hdr) hdr.style.display = 'none';
+  // 内嵌时：去掉 body 默认 padding，让内容完全贴 iframe 顶部
+  document.body.style.padding = '0';
+  document.body.style.margin = '0';
+  document.body.style.background = 'transparent';
+  // container 上下左右零边距，配合父 div 的 padding
+  const c = document.querySelector('.container');
+  if (c) {
+    c.style.maxWidth = '100%';
+    c.style.padding = '12px';
+    c.style.margin = '0';
+  }
+  // 防御性：强制 scroll 到顶部（防止浏览器 restore 之前滚动位置）
+  setTimeout(() => window.scrollTo(0, 0), 50);
+  setTimeout(() => window.scrollTo(0, 0), 300);
+}
+
+// 多渠道获取 user_id（按优先级）：
+//   1. URL ?uid=X         — iframe 父组件主动传入（最可靠）
+//   2. localStorage.uid   — 本页登录后写入的标准 key
+//   3. localStorage.user  — newapi React 主前端 zustand 持久化的 key (JSON)
+function resolveUserId() {
+  // (1) URL 参数
+  const urlUid = new URLSearchParams(location.search).get('uid');
+  if (urlUid && urlUid !== 'undefined' && urlUid !== 'null') {
+    localStorage.setItem('uid', urlUid);
+    return urlUid;
+  }
+  // (2) 标准 uid key
+  const uid = localStorage.getItem('uid');
+  if (uid) return uid;
+  // (3) newapi 主前端的 user 对象
+  try {
+    const raw = localStorage.getItem('user');
+    if (raw) {
+      const u = JSON.parse(raw);
+      if (u && u.id) {
+        // 同步写入标准 uid key，下次跳过 (3)
+        localStorage.setItem('uid', String(u.id));
+        if (u.username) localStorage.setItem('username', u.username);
+        return String(u.id);
+      }
+    }
+  } catch { /* JSON 损坏，忽略 */ }
+  return null;
+}
+
+function initAuth() {
+  applyEmbeddedStyles();
+  state.uid = resolveUserId();
+  if (!state.uid) {
+    // 隐藏 filters + 表格，只显示登录卡片
+    document.getElementById('filters-card').style.display = 'none';
+    document.getElementById('table-card').style.display = 'none';
+    document.getElementById('analytics-section').style.display = 'none';
+    document.getElementById('hot-section').style.display = 'none';
+    document.getElementById('auth-alert').style.display = 'block';
+    // 自动聚焦用户名输入框
+    setTimeout(() => document.getElementById('login-user')?.focus(), 100);
+    return false;
+  }
+  return true;
+}
+
+async function ensureConsoleUserState() {
+  if (localStorage.getItem('user')) return;
+  try {
+    const res = await fetch('/api/user/self', {
+      credentials: 'include',
+      headers: { 'New-API-User': state.uid || localStorage.getItem('uid') || '' },
+    });
+    const data = await res.json();
+    if (data.success && data.data && data.data.id) {
+      localStorage.setItem('user', JSON.stringify(data.data));
+      localStorage.setItem('uid', String(data.data.id));
+      if (data.data.username) localStorage.setItem('username', data.data.username);
+      state.uid = String(data.data.id);
+    }
+  } catch {
+    // 如果 session 已过期，列表接口会给出登录提示，不在这里打断页面。
+  }
+}
+
+// 内置登录 — 直接调 /api/user/login，成功后同步写入 Prompt 页和主控制台共用的登录态
+async function doLogin() {
+  const username = document.getElementById('login-user').value.trim();
+  const password = document.getElementById('login-pass').value;
+  const errBox = document.getElementById('login-err');
+  const btn = document.getElementById('login-btn');
+
+  if (!username || !password) {
+    errBox.textContent = '请输入用户名和密码';
+    errBox.style.display = 'block';
+    return;
+  }
+
+  errBox.style.display = 'none';
+  btn.disabled = true;
+  btn.textContent = '登录中...';
+
+  try {
+    const res = await fetch('/api/user/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password }),
+      credentials: 'include',
+    });
+    const data = await res.json();
+    if (!data.success) {
+      throw new Error(data.message || '登录失败');
+    }
+    // 把 user_id 写进 localStorage.uid（lib/api.ts 期望的 key）
+    const uid = data.data && data.data.id;
+    if (!uid) {
+      throw new Error('登录响应缺少 user id 字段');
+    }
+    localStorage.setItem('uid', String(uid));
+    localStorage.setItem('username', data.data.username || '');
+    localStorage.setItem('user', JSON.stringify(data.data));
+    // 刷新页面 — initAuth 会读到 uid 然后正常加载列表
+    location.reload();
+  } catch (e) {
+    errBox.textContent = '❌ ' + e.message;
+    errBox.style.display = 'block';
+    btn.disabled = false;
+    btn.textContent = '登录';
+  }
+}
+
+// 已通过主控制台登录的用户走这条 — 重新读 localStorage 试试
+function checkAndReload() {
+  const uid = localStorage.getItem('uid');
+  const user = localStorage.getItem('user');
+  if (uid || user) {
+    if (!uid && user) {
+      try {
+        const parsed = JSON.parse(user);
+        if (parsed && parsed.id) localStorage.setItem('uid', String(parsed.id));
+      } catch { /* ignore broken cached user */ }
+    }
+    location.reload();
+  } else {
+    const errBox = document.getElementById('login-err');
+    errBox.innerHTML = '还没有检测到主控制台登录态。<br>请先在上方表单登录，或在主控制台登录后再刷新本页。';
+    errBox.style.display = 'block';
+  }
+}
+
+// Enter 触发登录
+document.addEventListener('keydown', e => {
+  if (e.key === 'Enter' &&
+      (e.target.id === 'login-user' || e.target.id === 'login-pass')) {
+    doLogin();
+  }
+});
+
+// =============================================
+// 加载多维统计
+// =============================================
+async function loadAnalytics() {
+  const days = parseInt(document.getElementById('range').value);
+  const params = new URLSearchParams();
+  if (!Number.isNaN(days)) params.set('since_days', String(days));
+
+  try {
+    const data = await api('/api/prompts/analytics?' + params);
+    state.analytics = data;
+    renderAnalytics(data);
+  } catch (e) {
+    document.getElementById('analytics-metrics').innerHTML =
+      `<div class="metric"><div class="label">统计加载失败</div><div class="sub">${escapeHtml(e.message)}</div></div>`;
+    document.getElementById('daily-trend').textContent = '—';
+    document.getElementById('model-bars').textContent = '—';
+    document.getElementById('risk-panel').textContent = '—';
+    document.getElementById('language-bars').textContent = '—';
+    document.getElementById('token-bars').textContent = '—';
+  }
+}
+
+function renderAnalytics(data) {
+  const o = data.overview || {};
+  document.getElementById('analytics-metrics').innerHTML = [
+    metricHtml('归档调用', formatNumber(o.total_calls), `Prompt ${formatNumber(o.prompt_tokens)} tokens`),
+    metricHtml('唯一 Prompt', formatNumber(o.unique_prompts), `复用率 ${formatPercent(o.reuse_rate)}`),
+    metricHtml('DLP 命中', formatNumber(o.dlp_hits), `命中率 ${formatPercent(o.dlp_rate)}`),
+    metricHtml('平均规模', `${formatNumber(o.avg_prompt_tokens)} tokens`, `平均 ${formatNumber(o.avg_prompt_chars)} 字符`),
+  ].join('');
+
+  renderDailyTrend(data.daily_trend || []);
+  renderBars('model-bars', data.by_model || []);
+  renderBars('language-bars', data.by_language || []);
+  renderBars('token-bars', data.token_buckets || []);
+  renderRiskPanel(data);
+}
+
+function metricHtml(label, value, sub) {
+  return `
+    <div class="metric">
+      <div class="label">${escapeHtml(label)}</div>
+      <div class="value">${escapeHtml(value)}</div>
+      <div class="sub">${escapeHtml(sub || '')}</div>
+    </div>`;
+}
+
+function renderBars(id, items) {
+  const el = document.getElementById(id);
+  if (!items.length) {
+    el.className = 'trend-empty';
+    el.textContent = '暂无数据';
+    return;
+  }
+  el.className = '';
+  const max = Math.max(...items.map(x => Number(x.count || 0)), 1);
+  el.innerHTML = items.slice(0, 6).map(x => {
+    const width = Math.max(4, Math.round(Number(x.count || 0) * 100 / max));
+    return `
+      <div class="bar-row">
+        <div class="bar-label" title="${escapeHtml(x.name)}">${escapeHtml(x.name || 'unknown')}</div>
+        <div class="bar-track"><div class="bar-fill" style="width:${width}%"></div></div>
+        <div class="bar-value">${formatNumber(x.count)}</div>
+      </div>`;
+  }).join('');
+}
+
+function renderDailyTrend(items) {
+  const el = document.getElementById('daily-trend');
+  if (!items.length) {
+    el.className = 'trend-empty';
+    el.textContent = '暂无数据';
+    return;
+  }
+  el.className = 'trend';
+  const recent = items.slice(-30);
+  const max = Math.max(...recent.map(x => Number(x.count || 0)), 1);
+  el.innerHTML = recent.map(x => {
+    const height = Math.max(6, Math.round(Number(x.count || 0) * 68 / max));
+    return `<div class="trend-bar" title="${escapeHtml(x.date)} · ${formatNumber(x.count)} 次" style="height:${height}px"></div>`;
+  }).join('');
+}
+
+function renderRiskPanel(data) {
+  const o = data.overview || {};
+  const langs = data.by_language || [];
+  const tokenBuckets = data.token_buckets || [];
+  const dlpCats = data.by_dlp_category || [];
+  const topLang = langs[0] ? `${langs[0].name} · ${formatNumber(langs[0].count)}` : '暂无';
+  const longPrompt = tokenBuckets.find(x => x.name === '8k+')?.count || 0;
+  const topDlp = dlpCats[0] ? `${dlpCats[0].name} · ${formatNumber(dlpCats[0].count)}` : '暂无';
+
+  document.getElementById('risk-panel').innerHTML = `
+    <div class="risk-line"><span>DLP 命中率</span><strong>${formatPercent(o.dlp_rate)}</strong></div>
+    <div class="risk-line"><span>流式调用占比</span><strong>${formatPercent(o.stream_rate)}</strong></div>
+    <div class="risk-line"><span>8k+ Prompt</span><strong>${formatNumber(longPrompt)}</strong></div>
+    <div class="risk-line"><span>主要语言</span><strong>${escapeHtml(topLang)}</strong></div>
+    <div class="risk-line"><span>高频风险类别</span><strong>${escapeHtml(topDlp)}</strong></div>
+  `;
+}
+
+// =============================================
+// 加载质量洞察
+// =============================================
+async function loadInsights() {
+  const days = parseInt(document.getElementById('range').value);
+  const params = new URLSearchParams();
+  if (!Number.isNaN(days)) params.set('since_days', String(days));
+
+  try {
+    const data = await api('/api/prompts/insights?' + params);
+    state.insights = data;
+    renderInsights(data);
+  } catch (e) {
+    document.getElementById('quality-metrics').innerHTML =
+      `<div class="metric"><div class="label">洞察加载失败</div><div class="sub">${escapeHtml(e.message)}</div></div>`;
+    document.getElementById('prompt-issues').textContent = '—';
+    document.getElementById('completion-issues').textContent = '—';
+    document.getElementById('high-frequency').textContent = '—';
+    document.getElementById('skill-candidates').textContent = '—';
+    document.getElementById('quality-recommendations').innerHTML = '<li>暂无建议</li>';
+  }
+}
+
+function renderInsights(data) {
+  const o = data.overview || {};
+  document.getElementById('quality-metrics').innerHTML = [
+    metricHtml('输入质量均分', scoreText(o.avg_prompt_quality_score), `优秀率 ${formatPercent(o.high_quality_prompt_rate)}`),
+    metricHtml('输出反馈均分', scoreText(o.avg_completion_score), `弱输出率 ${formatPercent(o.weak_completion_rate)}`),
+    metricHtml('弱 Prompt 占比', formatPercent(o.weak_prompt_rate), `样本 ${formatNumber(o.total_calls)} 次`),
+    metricHtml('Skill 候选', formatNumber(o.skill_candidate_count), `可复用族群 ${formatNumber(o.reusable_prompt_families)}`),
+  ].join('');
+
+  renderIssueList('prompt-issues', data.prompt_issues || []);
+  renderIssueList('completion-issues', data.completion_issues || []);
+  renderHighFrequency(data.high_frequency || []);
+  renderSkillCandidates(data.skill_candidates || []);
+  renderRecommendations(data.recommendations || []);
+}
+
+function scoreText(v) {
+  const n = Number(v || 0);
+  return n > 0 ? n.toFixed(1) : '—';
+}
+
+function renderIssueList(id, items) {
+  const el = document.getElementById(id);
+  if (!items.length) {
+    el.className = 'trend-empty';
+    el.textContent = '暂无明显问题';
+    return;
+  }
+  el.className = '';
+  el.innerHTML = items.slice(0, 6).map(x => `
+    <div class="issue-row" title="${escapeHtml(x.advice || '')}">
+      <span>${escapeHtml(x.name)}</span>
+      <strong>${formatNumber(x.count)}</strong>
+    </div>
+  `).join('');
+}
+
+function renderHighFrequency(items) {
+  const el = document.getElementById('high-frequency');
+  if (!items.length) {
+    el.className = 'trend-empty';
+    el.textContent = '暂无高频复用输入';
+    return;
+  }
+  el.className = 'insight-list';
+  el.innerHTML = items.slice(0, 5).map(x => `
+    <div class="insight-item">
+      <strong>${escapeHtml(preview(x.prompt_redacted, 90))}</strong>
+      <div class="muted">${formatNumber(x.hit_count)}× 复用 · 输入 ${scoreText(x.avg_prompt_score)} · 输出 ${scoreText(x.avg_completion_score)} · ${escapeHtml(x.skill_readiness)}</div>
+      <div>${escapeHtml(x.suggestion || '')}</div>
+    </div>
+  `).join('');
+}
+
+function renderSkillCandidates(items) {
+  const el = document.getElementById('skill-candidates');
+  if (!items.length) {
+    el.className = 'trend-empty';
+    el.textContent = '暂无可沉淀 skill 候选';
+    return;
+  }
+  el.className = 'insight-list';
+  el.innerHTML = items.slice(0, 4).map(x => `
+    <div class="insight-item">
+      <strong>${escapeHtml(x.recommended_name || x.title)}</strong>
+      <div class="muted">${formatNumber(x.hit_count)}× · 输入 ${scoreText(x.avg_prompt_score)} · 输出 ${scoreText(x.avg_completion_score)}</div>
+      <div>${escapeHtml(x.evidence || '')}</div>
+    </div>
+  `).join('');
+}
+
+function renderRecommendations(items) {
+  const el = document.getElementById('quality-recommendations');
+  if (!items.length) {
+    el.innerHTML = '<li>暂无建议</li>';
+    return;
+  }
+  el.innerHTML = items.map(x => `<li>${escapeHtml(x)}</li>`).join('');
+}
+
+// =============================================
+// 加载列表
+// =============================================
+async function loadList() {
+  const tbody = document.getElementById('rows');
+  tbody.innerHTML = '<tr><td colspan="6" class="loading">加载中…</td></tr>';
+
+  const params = new URLSearchParams({
+    p: state.page,
+    page_size: PAGE_SIZE,
+  });
+  const kw = document.getElementById('keyword').value.trim();
+  const model = document.getElementById('model').value;
+  const days = parseInt(document.getElementById('range').value);
+  if (kw) params.set('keyword', kw);
+  if (model) params.set('model_name', model);
+  if (days > 0) params.set('start_timestamp', Math.floor(Date.now()/1000) - days*86400);
+
+  try {
+    const data = await api('/api/prompts/me?' + params);
+    state.total = data.total || 0;
+    const items = data.items || [];
+
+    if (items.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="6" class="empty">暂无记录。开始用 AI 调用就会自动归档到这里。</td></tr>';
+    } else {
+      tbody.innerHTML = items.map(row => {
+        // 收集模型用于下拉
+        if (row.model_name) state.modelOptions.add(row.model_name);
+        return `
+          <tr onclick="openDetail(${row.id})">
+            <td class="time">${formatTime(row.created_at)}</td>
+            <td>${escapeHtml(row.model_name)}</td>
+            <td class="preview">${escapeHtml(preview(row.prompt_redacted, 60))}</td>
+            <td class="preview">${escapeHtml(preview(row.completion_redacted, 60))}</td>
+            <td class="tokens">${row.prompt_tokens}↑ / ${row.completion_tokens}↓</td>
+            <td>
+              ${row.is_stream ? '<span class="badge stream">stream</span>' : ''}
+              ${row.dlp_hit ? '<span class="badge dlp">DLP</span>' : ''}
+              ${row.prompt_lang ? `<span class="badge lang">${escapeHtml(row.prompt_lang)}</span>` : ''}
+            </td>
+          </tr>`;
+      }).join('');
+    }
+
+    refreshModelOptions();
+    updatePagination();
+  } catch (e) {
+    tbody.innerHTML = `<tr><td colspan="6" class="empty">❌ 加载失败：${escapeHtml(e.message)}</td></tr>`;
+  }
+}
+
+function refreshModelOptions() {
+  const sel = document.getElementById('model');
+  const cur = sel.value;
+  sel.innerHTML = '<option value="">所有模型</option>' +
+    Array.from(state.modelOptions).sort()
+      .map(m => `<option value="${escapeHtml(m)}" ${m===cur?'selected':''}>${escapeHtml(m)}</option>`)
+      .join('');
+}
+
+function updatePagination() {
+  const totalPages = Math.max(1, Math.ceil(state.total / PAGE_SIZE));
+  document.getElementById('pagination-info').textContent =
+    `共 ${state.total} 条 · 第 ${state.page} / ${totalPages} 页`;
+  document.getElementById('prev-btn').disabled = state.page <= 1;
+  document.getElementById('next-btn').disabled = state.page >= totalPages;
+}
+
+function changePage(delta) {
+  state.page += delta;
+  if (state.page < 1) state.page = 1;
+  loadList();
+  window.scrollTo(0, 0);
+}
+
+// =============================================
+// 加载热门 prompt 卡片
+// =============================================
+async function loadHot() {
+  try {
+    const data = await api('/api/prompts/hot?since_days=7&top=5');
+    const items = data.items || [];
+    if (items.length === 0) return;
+
+    const html = `
+      <div class="card hot-card">
+        <h3>🔥 ${escapeHtml(data.group)} 组本周热门 Prompt（按 hash 复用次数）</h3>
+        ${items.map((h, i) => `
+          <div class="hot-item">
+            <span class="rank">#${i+1}</span>
+            <span class="text">${escapeHtml(preview(h.PromptRedacted, 100))}</span>
+            <span class="count">${h.HitCount}× 复用</span>
+          </div>
+        `).join('')}
+      </div>`;
+    document.getElementById('hot-section').innerHTML = html;
+  } catch (e) {
+    // 静默失败，不影响主列表
+    console.warn('hot prompts load failed:', e);
+  }
+}
+
+// =============================================
+// 详情 modal
+// =============================================
+async function openDetail(id) {
+  const modal = document.getElementById('modal');
+  document.getElementById('modal-meta').textContent = '加载中...';
+  document.getElementById('modal-prompt').textContent = '';
+  document.getElementById('modal-completion').textContent = '';
+  modal.classList.add('open');
+
+  try {
+    const detail = await api('/api/prompts/me/' + id);
+    state.currentDetail = detail;
+    document.getElementById('modal-meta').innerHTML = `
+      <span class="meta-item"><strong>#${detail.id}</strong> · ${escapeHtml(detail.model_name)}</span>
+      <span class="meta-item">⏱ ${formatTime(detail.created_at)}</span>
+      <span class="meta-item">Tokens: ${detail.prompt_tokens}↑ / ${detail.completion_tokens}↓</span>
+      <span class="meta-item">耗时: ${detail.use_time_sec}s</span>
+      ${detail.is_stream ? '<span class="badge stream">stream</span>' : ''}
+      ${detail.dlp_hit ? `<span class="badge dlp">DLP: ${escapeHtml(detail.dlp_categories)}</span>` : ''}
+      ${detail.prompt_lang ? `<span class="badge lang">${escapeHtml(detail.prompt_lang)}</span>` : ''}
+    `;
+    // raw 字段经 backend GORM AfterFind 已自动解密
+    document.getElementById('modal-prompt').textContent =
+      detail.prompt_raw_enc || detail.prompt_redacted || '—';
+    document.getElementById('modal-completion').textContent =
+      detail.completion_raw_enc || detail.completion_redacted || '—';
+  } catch (e) {
+    document.getElementById('modal-meta').innerHTML =
+      `<span style="color:#c00">❌ ${escapeHtml(e.message)}</span>`;
+  }
+}
+
+function closeModal(e) {
+  if (e && e.target.id !== 'modal') return;
+  document.getElementById('modal').classList.remove('open');
+}
+
+function copyText(which) {
+  const detail = state.currentDetail;
+  if (!detail) return;
+  const text = which === 'prompt'
+    ? (detail.prompt_raw_enc || detail.prompt_redacted)
+    : (detail.completion_raw_enc || detail.completion_redacted);
+  navigator.clipboard.writeText(text || '').then(
+    () => alert('已复制到剪贴板'),
+    () => alert('复制失败')
+  );
+}
+
+// =============================================
+// 启动
+// =============================================
+document.getElementById('keyword').addEventListener('keydown', e => {
+  if (e.key === 'Enter') { state.page = 1; loadList(); }
+});
+document.getElementById('model').addEventListener('change', () => { state.page = 1; loadList(); });
+document.getElementById('range').addEventListener('change', () => { state.page = 1; loadAnalytics(); loadInsights(); loadList(); });
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') closeModal();
+});
+
+if (initAuth()) {
+  ensureConsoleUserState().finally(() => {
+    loadAnalytics();
+    loadInsights();
+    loadHot();
+    loadList();
+  });
+}
+</script>
+</body>
+</html>

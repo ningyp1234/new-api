@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -9,6 +10,9 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/dto"
@@ -29,6 +33,67 @@ type LoginRequest struct {
 	Password string `json:"password"`
 }
 
+const (
+	userPasswordRuleMessage            = "密码至少 12 位，且必须包含大写字母、小写字母、数字和符号"
+	emptyPasswordValidationPlaceholder = "__NEUTOKEN_EMPTY_PASSWORD_PLACEHOLDER_Aa1!__"
+)
+
+func describePasswordProblems(password string) string {
+	var problems []string
+	if length := utf8.RuneCountInString(password); length < 12 {
+		problems = append(problems, fmt.Sprintf("长度不足：当前 %d 位，至少需要 12 位", length))
+	}
+
+	var hasLower, hasUpper, hasDigit, hasSymbol bool
+	for _, c := range password {
+		switch {
+		case unicode.IsLower(c):
+			hasLower = true
+		case unicode.IsUpper(c):
+			hasUpper = true
+		case unicode.IsDigit(c):
+			hasDigit = true
+		case unicode.IsPunct(c) || unicode.IsSymbol(c):
+			hasSymbol = true
+		}
+	}
+
+	if !hasUpper {
+		problems = append(problems, "缺少大写字母")
+	}
+	if !hasLower {
+		problems = append(problems, "缺少小写字母")
+	}
+	if !hasDigit {
+		problems = append(problems, "缺少数字")
+	}
+	if !hasSymbol {
+		problems = append(problems, "缺少符号，例如 ! @ # $ %")
+	}
+	if len(problems) == 0 {
+		return userPasswordRuleMessage
+	}
+	return "密码不符合要求：" + strings.Join(problems, "；")
+}
+
+func formatUserValidationError(err error, password string) string {
+	errText := err.Error()
+	switch {
+	case strings.Contains(errText, "User.Password") && strings.Contains(errText, "max"):
+		return "密码最长 128 位"
+	case strings.Contains(errText, "User.Password"):
+		return describePasswordProblems(password)
+	case strings.Contains(errText, "User.Username") && strings.Contains(errText, "max"):
+		return "用户名最长 20 个字符"
+	case strings.Contains(errText, "User.DisplayName") && strings.Contains(errText, "max"):
+		return "显示名称最长 20 个字符"
+	case strings.Contains(errText, "User.Email") && strings.Contains(errText, "max"):
+		return "邮箱最长 50 个字符"
+	default:
+		return fmt.Sprintf("输入不合法：%s", errText)
+	}
+}
+
 func Login(c *gin.Context) {
 	if !common.PasswordLoginEnabled {
 		common.ApiErrorI18n(c, i18n.MsgUserPasswordLoginDisabled)
@@ -46,12 +111,48 @@ func Login(c *gin.Context) {
 		common.ApiErrorI18n(c, i18n.MsgInvalidParams)
 		return
 	}
+	// SECURITY (M-4): account-level lockout — independent of IP rate limit.
+	if locked, ttl := isAccountLocked(username); locked {
+		common.SysLog(fmt.Sprintf("login blocked: account %q is locked for %ds", username, ttl))
+		// AUDIT: write structured event so dashboards can query
+		model.RecordAuditEvent(&model.AuditEvent{
+			EventType: model.AuditEventLoginBlocked,
+			Severity:  model.SeverityHigh,
+			Username:  username,
+			IP:        c.ClientIP(),
+			UserAgent: c.Request.UserAgent(),
+			Detail:    fmt.Sprintf(`{"ttl_seconds":%d}`, ttl),
+		})
+		c.JSON(http.StatusTooManyRequests, gin.H{
+			"success": false,
+			"message": fmt.Sprintf("账号已被临时锁定，请 %d 秒后再试", ttl),
+		})
+		return
+	}
 	user := model.User{
 		Username: username,
 		Password: password,
 	}
 	err = user.ValidateAndFill()
 	if err != nil {
+		// Increment failure counter on any auth failure
+		newCount := recordFailedLogin(username)
+		// AUDIT: write structured event for the failure
+		severity := model.SeverityWarn
+		eventType := model.AuditEventLoginFail
+		if newCount >= loginLockoutThreshold() {
+			// This failure crossed the threshold and triggered lockout
+			severity = model.SeverityHigh
+			eventType = model.AuditEventLoginLockout
+		}
+		model.RecordAuditEvent(&model.AuditEvent{
+			EventType: eventType,
+			Severity:  severity,
+			Username:  username,
+			IP:        c.ClientIP(),
+			UserAgent: c.Request.UserAgent(),
+			Detail:    fmt.Sprintf(`{"failure_count":%d,"reason":"%s"}`, newCount, errString(err)),
+		})
 		switch {
 		case errors.Is(err, model.ErrDatabase):
 			common.SysLog(fmt.Sprintf("Login database error for user %s: %v", username, err))
@@ -63,6 +164,27 @@ func Login(c *gin.Context) {
 		}
 		return
 	}
+	// Successful login → reset failure counter
+	if cleared := clearFailedLogin(username); cleared > 0 {
+		// AUDIT: only record if there were prior failures (interesting forensic signal)
+		model.RecordAuditEvent(&model.AuditEvent{
+			EventType: model.AuditEventLockoutCleared,
+			Severity:  model.SeverityInfo,
+			UserId:    user.Id,
+			Username:  username,
+			IP:        c.ClientIP(),
+			Detail:    fmt.Sprintf(`{"cleared_failures":%d}`, cleared),
+		})
+	}
+	// Always record successful login as low-volume signal for forensics
+	model.RecordAuditEvent(&model.AuditEvent{
+		EventType: model.AuditEventLoginSuccess,
+		Severity:  model.SeverityInfo,
+		UserId:    user.Id,
+		Username:  user.Username,
+		IP:        c.ClientIP(),
+		UserAgent: c.Request.UserAgent(),
+	})
 
 	// 检查是否启用2FA
 	if model.IsTwoFAEnabled(user.Id) {
@@ -150,7 +272,7 @@ func Register(c *gin.Context) {
 		return
 	}
 	if err := common.Validate.Struct(&user); err != nil {
-		common.ApiErrorI18n(c, i18n.MsgUserInputInvalid, map[string]any{"Error": err.Error()})
+		common.ApiErrorMsg(c, formatUserValidationError(err, user.Password))
 		return
 	}
 	if common.EmailVerificationEnabled {
@@ -550,10 +672,10 @@ func UpdateUser(c *gin.Context) {
 		return
 	}
 	if updatedUser.Password == "" {
-		updatedUser.Password = "$I_LOVE_U" // make Validator happy :)
+		updatedUser.Password = emptyPasswordValidationPlaceholder // make Validator happy :)
 	}
 	if err := common.Validate.Struct(&updatedUser); err != nil {
-		common.ApiErrorI18n(c, i18n.MsgUserInputInvalid, map[string]any{"Error": err.Error()})
+		common.ApiErrorMsg(c, formatUserValidationError(err, updatedUser.Password))
 		return
 	}
 	originUser, err := model.GetUserById(updatedUser.Id, false)
@@ -570,7 +692,7 @@ func UpdateUser(c *gin.Context) {
 		common.ApiErrorI18n(c, i18n.MsgUserCannotCreateHigherLevel)
 		return
 	}
-	if updatedUser.Password == "$I_LOVE_U" {
+	if updatedUser.Password == emptyPasswordValidationPlaceholder {
 		updatedUser.Password = "" // rollback to what it should be
 	}
 	updatePassword := updatedUser.Password != ""
@@ -701,10 +823,10 @@ func UpdateSelf(c *gin.Context) {
 	}
 
 	if user.Password == "" {
-		user.Password = "$I_LOVE_U" // make Validator happy :)
+		user.Password = emptyPasswordValidationPlaceholder // make Validator happy :)
 	}
 	if err := common.Validate.Struct(&user); err != nil {
-		common.ApiErrorI18n(c, i18n.MsgInvalidInput)
+		common.ApiErrorMsg(c, formatUserValidationError(err, user.Password))
 		return
 	}
 
@@ -714,7 +836,7 @@ func UpdateSelf(c *gin.Context) {
 		Password:    user.Password,
 		DisplayName: user.DisplayName,
 	}
-	if user.Password == "$I_LOVE_U" {
+	if user.Password == emptyPasswordValidationPlaceholder {
 		user.Password = "" // rollback to what it should be
 		cleanUser.Password = ""
 	}
@@ -811,7 +933,7 @@ func CreateUser(c *gin.Context) {
 		return
 	}
 	if err := common.Validate.Struct(&user); err != nil {
-		common.ApiErrorI18n(c, i18n.MsgUserInputInvalid, map[string]any{"Error": err.Error()})
+		common.ApiErrorMsg(c, formatUserValidationError(err, user.Password))
 		return
 	}
 	if user.DisplayName == "" {
@@ -1265,4 +1387,85 @@ func UpdateUserSetting(c *gin.Context) {
 	}
 
 	common.ApiSuccessI18n(c, i18n.MsgSettingSaved, nil)
+}
+
+// SECURITY (M-4): account-level login lockout primitives.
+// Default: 5 failures within 15 minutes locks the account for 15 minutes.
+// Configurable via LOGIN_LOCKOUT_THRESHOLD and LOGIN_LOCKOUT_WINDOW_SECONDS.
+func loginLockoutThreshold() int {
+	n := common.GetEnvOrDefault("LOGIN_LOCKOUT_THRESHOLD", 5)
+	if n < 1 {
+		return 5
+	}
+	return n
+}
+func loginLockoutWindow() int {
+	n := common.GetEnvOrDefault("LOGIN_LOCKOUT_WINDOW_SECONDS", 900)
+	if n < 30 {
+		return 900
+	}
+	return n
+}
+func loginFailKey(username string) string {
+	return "login_fail:" + strings.ToLower(strings.TrimSpace(username))
+}
+func isAccountLocked(username string) (bool, int) {
+	if !common.RedisEnabled || common.RDB == nil {
+		return false, 0
+	}
+	key := loginFailKey(username)
+	count, err := common.RDB.Get(context.Background(), key).Int()
+	if err != nil {
+		return false, 0
+	}
+	if count >= loginLockoutThreshold() {
+		ttl, _ := common.RDB.TTL(context.Background(), key).Result()
+		return true, int(ttl.Seconds())
+	}
+	return false, 0
+}
+
+// recordFailedLogin returns the new failure counter value after incr.
+// 0 indicates redis unavailable / error path.
+func recordFailedLogin(username string) int {
+	if !common.RedisEnabled || common.RDB == nil {
+		return 0
+	}
+	ctx := context.Background()
+	key := loginFailKey(username)
+	count, err := common.RDB.Incr(ctx, key).Result()
+	if err != nil {
+		return 0
+	}
+	if count == 1 {
+		_ = common.RDB.Expire(ctx, key, time.Duration(loginLockoutWindow())*time.Second).Err()
+	}
+	return int(count)
+}
+
+// clearFailedLogin returns how many failures were cleared (for audit trail).
+// 0 = no prior failures (no event to record).
+func clearFailedLogin(username string) int {
+	if !common.RedisEnabled || common.RDB == nil {
+		return 0
+	}
+	ctx := context.Background()
+	key := loginFailKey(username)
+	prior, _ := common.RDB.Get(ctx, key).Int()
+	_ = common.RDB.Del(ctx, key).Err()
+	return prior
+}
+
+// errString — small helper used by audit events to summarize errors safely.
+func errString(err error) string {
+	if err == nil {
+		return ""
+	}
+	s := err.Error()
+	// truncate to keep audit detail JSON compact
+	if len(s) > 100 {
+		s = s[:100]
+	}
+	// escape JSON-unsafe chars minimally
+	return strings.ReplaceAll(strings.ReplaceAll(s, `"`, `'`), "\n", " ")
 }

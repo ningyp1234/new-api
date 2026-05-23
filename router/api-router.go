@@ -287,7 +287,8 @@ func SetApiRouter(router *gin.Engine) {
 		}
 		logRoute := apiRouter.Group("/log")
 		logRoute.GET("/", middleware.AdminAuth(), controller.GetAllLogs)
-		logRoute.DELETE("/", middleware.AdminAuth(), controller.DeleteHistoryLogs)
+		// SECURITY (H-5): elevated to RootAuth + secure verification (TOTP/2FA)
+		logRoute.DELETE("/", middleware.RootAuth(), middleware.SecureVerificationRequired(), controller.DeleteHistoryLogs)
 		logRoute.GET("/stat", middleware.AdminAuth(), controller.GetLogsStat)
 		logRoute.GET("/self/stat", middleware.UserAuth(), controller.GetLogsSelfStat)
 		logRoute.GET("/channel_affinity_usage_cache", middleware.AdminAuth(), controller.GetChannelAffinityUsageCacheStats)
@@ -299,6 +300,20 @@ func SetApiRouter(router *gin.Engine) {
 		dataRoute.GET("/", middleware.AdminAuth(), controller.GetAllQuotaDates)
 		dataRoute.GET("/users", middleware.AdminAuth(), controller.GetQuotaDatesByUser)
 		dataRoute.GET("/self", middleware.UserAuth(), controller.GetUserQuotaDates)
+
+		// P0 D5/D6: prompt 资产化归档 API
+		// /me      → 个人 prompt 历史（自己看自己的，含解密 raw）
+		// /me/:id  → 单条详情
+		// /hot     → 当前用户所属 group 的热门 prompt（脱敏版 + 复用计数）
+		// /admin/purge-raw → root 手动触发 90 天 raw 字段清理
+		promptRoute := apiRouter.Group("/prompts")
+		promptRoute.GET("/me", middleware.UserAuth(), controller.GetMyPrompts)
+		promptRoute.GET("/analytics", middleware.UserAuth(), controller.GetMyPromptAnalytics)
+		promptRoute.GET("/insights", middleware.UserAuth(), controller.GetMyPromptInsights)
+		promptRoute.GET("/me/:id", middleware.UserAuth(), controller.GetMyPromptDetail)
+		promptRoute.GET("/hot", middleware.UserAuth(), controller.GetHotPromptsForGroup)
+		// SECURITY: raw 清理是不可逆操作，提级到 RootAuth + 二次验证（与 H-5 删 logs 同等级）
+		promptRoute.POST("/admin/purge-raw", middleware.RootAuth(), middleware.SecureVerificationRequired(), controller.AdminPurgeRawNow)
 
 		logRoute.Use(middleware.CORS(), middleware.CriticalRateLimit())
 		{

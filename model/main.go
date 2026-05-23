@@ -1,6 +1,8 @@
 package model
 
 import (
+	"crypto/rand"
+	"encoding/base64"
 	"fmt"
 	"log"
 	"os"
@@ -69,8 +71,17 @@ func createRootAccountIfNeed() error {
 	var user User
 	//if user.Status != common.UserStatusEnabled {
 	if err := DB.First(&user).Error; err != nil {
-		common.SysLog("no user exists, create a root user for you: username is root, password is 123456")
-		hashedPassword, err := common.Password2Hash("123456")
+		// SECURITY (C-1): 不再使用硬编码密码 "123456"。
+		// 改为生成强随机密码，写入 /data/initial_root_password.txt（0400），
+		// 由部署人员一次性读取后改密。也允许通过环境变量 INITIAL_ROOT_PASSWORD 覆盖。
+		initialPwd := os.Getenv("INITIAL_ROOT_PASSWORD")
+		if initialPwd == "" {
+			initialPwd = generateRootPassword()
+		}
+		if len(initialPwd) < 16 {
+			return fmt.Errorf("INITIAL_ROOT_PASSWORD must be >= 16 chars")
+		}
+		hashedPassword, err := common.Password2Hash(initialPwd)
 		if err != nil {
 			return err
 		}
@@ -83,9 +94,31 @@ func createRootAccountIfNeed() error {
 			AccessToken: nil,
 			Quota:       100000000,
 		}
-		DB.Create(&rootUser)
+		if err := DB.Create(&rootUser).Error; err != nil {
+			return err
+		}
+		writeInitialRootPasswordOnce(initialPwd)
+		common.SysLog("root user created. initial password written to /data/initial_root_password.txt — please log in and change it immediately")
 	}
 	return nil
+}
+
+// generateRootPassword 生成 32 字符高熵随机密码
+func generateRootPassword() string {
+	b := make([]byte, 24)
+	if _, err := rand.Read(b); err != nil {
+		return fmt.Sprintf("emergency-%d-%s", time.Now().UnixNano(), common.GetUUID())
+	}
+	return strings.TrimRight(base64.URLEncoding.EncodeToString(b), "=")
+}
+
+// writeInitialRootPasswordOnce 把初始密码写到 /data 下，文件权限 0400；存在则不覆盖
+func writeInitialRootPasswordOnce(pwd string) {
+	path := "/data/initial_root_password.txt"
+	if _, err := os.Stat(path); err == nil {
+		return
+	}
+	_ = os.WriteFile(path, []byte(pwd+"\n"), 0o400)
 }
 
 func CheckSetup() {
@@ -213,6 +246,14 @@ func InitDB() (err error) {
 func InitLogDB() (err error) {
 	if os.Getenv("LOG_SQL_DSN") == "" {
 		LOG_DB = DB
+		switch {
+		case common.UsingPostgreSQL:
+			common.LogSqlType = common.DatabaseTypePostgreSQL
+		case common.UsingMySQL:
+			common.LogSqlType = common.DatabaseTypeMySQL
+		default:
+			common.LogSqlType = common.DatabaseTypeSQLite
+		}
 		return
 	}
 	db, err := chooseDB("LOG_SQL_DSN", true)
@@ -280,6 +321,12 @@ func migrateDB() error {
 		&SubscriptionPreConsumeRecord{},
 		&CustomOAuthProvider{},
 		&UserOAuthBinding{},
+		// ── 安全 / 合规 / prompt 资产化（统一在主 DB 建表）─────────────
+		// 历史问题：原 migrateLOGDB() 仅在 LOG_SQL_DSN 设置时被调用，
+		// 而大多数部署未设 LOG_SQL_DSN → LOG_DB 复用主 DB → migrateLOGDB
+		// 实际从未运行。把这些表统一放主 migrate 列表，确保所有部署都建表。
+		&AuditEvent{},    // M3 结构化审计事件
+		&PromptArchive{}, // P0 D1 prompt + completion 全文归档
 	)
 	if err != nil {
 		return err
@@ -368,6 +415,14 @@ func migrateDBFast() error {
 func migrateLOGDB() error {
 	var err error
 	if err = LOG_DB.AutoMigrate(&Log{}); err != nil {
+		return err
+	}
+	// SECURITY: structured audit events table for DLP / login / ssrf / log_delete
+	if err = LOG_DB.AutoMigrate(&AuditEvent{}); err != nil {
+		return err
+	}
+	// P0 D1: prompt + completion 全文归档表（用户 prompt 资产化分析）
+	if err = LOG_DB.AutoMigrate(&PromptArchive{}); err != nil {
 		return err
 	}
 	return nil

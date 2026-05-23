@@ -74,6 +74,11 @@ export function useSidebarData(): SidebarData {
             icon: FileText,
           },
           {
+            title: t('My Prompt History'),
+            url: '/prompts/me',
+            icon: MessageSquare,
+          },
+          {
             title: t('Task Logs'),
             url: '/usage-logs/task',
             activeUrls: ['/usage-logs/drawing'],

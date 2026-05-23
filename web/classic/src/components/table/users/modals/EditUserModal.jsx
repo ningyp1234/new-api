@@ -60,6 +60,41 @@ import UserBindingManagementModal from './UserBindingManagementModal';
 
 const { Text, Title } = Typography;
 
+const PASSWORD_RULE_TEXT =
+  '密码至少 12 位，且必须包含大写字母、小写字母、数字和符号';
+
+const getPasswordValidationMessage = (value) => {
+  const problems = [];
+  const length = Array.from(value || '').length;
+  if (length < 12) {
+    problems.push(`长度不足：当前 ${length} 位，至少需要 12 位`);
+  }
+  if (!/[A-Z]/.test(value)) {
+    problems.push('缺少大写字母');
+  }
+  if (!/[a-z]/.test(value)) {
+    problems.push('缺少小写字母');
+  }
+  if (!/\d/.test(value)) {
+    problems.push('缺少数字');
+  }
+  if (!/[\p{P}\p{S}]/u.test(value)) {
+    problems.push('缺少符号，例如 ! @ # $ %');
+  }
+  return problems.length > 0 ? `密码不符合要求：${problems.join('；')}` : '';
+};
+
+const validateOptionalPassword = (value) => {
+  if (!value) {
+    return Promise.resolve();
+  }
+  const message = getPasswordValidationMessage(value);
+  if (!message) {
+    return Promise.resolve();
+  }
+  return Promise.reject(message);
+};
+
 const EditUserModal = (props) => {
   const { t } = useTranslation();
   const userId = props.editingUser.id;
@@ -308,8 +343,15 @@ const EditUserModal = (props) => {
                       <Form.Input
                         field='password'
                         label={t('密码')}
-                        placeholder={t('请输入新的密码，最短 8 位')}
+                        placeholder={t('留空则不修改密码，例如：TestPass123!')}
+                        extraText={t(PASSWORD_RULE_TEXT)}
                         mode='password'
+                        rules={[
+                          {
+                            validator: (rule, value) =>
+                              validateOptionalPassword(value),
+                          },
+                        ]}
                         showClear
                       />
                     </Col>

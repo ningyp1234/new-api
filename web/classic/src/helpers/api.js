@@ -54,6 +54,28 @@ function patchAPIInstance(instance) {
   const originalGet = instance.get.bind(instance);
   const inFlightGetRequests = new Map();
 
+  instance.interceptors.request.use((config) => {
+    const userId = getUserIdFromLocalStorage();
+    config.headers = config.headers || {};
+    if (userId && userId > 0) {
+      config.headers['New-API-User'] = userId;
+    }
+    config.headers['Cache-Control'] = 'no-store';
+    return config;
+  });
+
+  instance.interceptors.response.use(
+    (response) => response,
+    (error) => {
+      // 如果请求配置中显式要求跳过全局错误处理，则不弹出默认错误提示
+      if (error.config && error.config.skipErrorHandler) {
+        return Promise.reject(error);
+      }
+      showError(error);
+      return Promise.reject(error);
+    },
+  );
+
   const genKey = (url, config = {}) => {
     const params = config.params ? JSON.stringify(config.params) : '{}';
     return `${url}?${params}`;
@@ -93,18 +115,6 @@ export function updateAPI() {
 
   patchAPIInstance(API);
 }
-
-API.interceptors.response.use(
-  (response) => response,
-  (error) => {
-    // 如果请求配置中显式要求跳过全局错误处理，则不弹出默认错误提示
-    if (error.config && error.config.skipErrorHandler) {
-      return Promise.reject(error);
-    }
-    showError(error);
-    return Promise.reject(error);
-  },
-);
 
 // playground
 
